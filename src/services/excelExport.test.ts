@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import * as XLSXStyle from 'xlsx-js-style';
 import { describe, expect, test } from 'vitest';
 import type { ExportResponse, TransactionRow } from '../domain/dto';
 import type { Client } from '../domain/types';
@@ -127,5 +128,17 @@ describe('Excel 추출 양식', () => {
     expect(cell(ws, 'AS4')).toBe('재원');
     expect(cell(ws, 'E5')).toBe('세인트팩㈜');
     expect(ws['!merges']?.some((m) => m.s.r === 1 && m.s.c === 8 && m.e.c === 19)).toBe(true); // 연도 12칸 병합
+  });
+
+  test('노무자문비: 거래처별 마지막 입금월 셀은 보라색 (파일 저장 후에도 유지)', () => {
+    const X = XLSXStyle as unknown as typeof XLSX;
+    const wb = buildWorkbook(X, data, null);
+    const buf = X.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const back = X.read(buf, { type: 'buffer', cellStyles: true }).Sheets['노무자문비'];
+    const fill = (a1: string) => (back[a1] as { s?: { fgColor?: { rgb?: string } } } | undefined)?.s?.fgColor?.rgb;
+    expect(cell(back, 'AN4')).toBe('9/10,9/23'); // 청담웨딩프라자 마지막 입금월 2026-08
+    expect(fill('AN4')).toBe('C9A7F0');
+    expect(fill('K4')).toBeUndefined(); // 이전 월(2024-03)은 칠하지 않음
+    expect(cell(back, 'E1')).toMatch(/보라색/);
   });
 });

@@ -10,7 +10,8 @@ import type { Client } from '../domain/types';
  * 1. 입출금내역 : 1~3행 헤더, B~D열 '수입' (입금일 · 적요 · 수입금액)
  * 2. 급여관리   : 번호 · 이름(회사명 + 월) · 공급가액 · 부가세 · 입금일 · 입금액
  * 3. 개별건     : 번호 · 상호 · 공급가액 · 부가세 · 입금일 · 입금액
- * 4. 노무자문비 : 기존 '[ 매 출 ]-회원사' 양식 (2행 연도, 3행 월, 각 행에 입금일)
+ * 4. 노무자문비 : 기존 '[ 매 출 ]-회원사' 양식 (2행 연도, 3행 월, 각 행에 입금일), 거래처별 마지막 입금월 셀은 보라색
+ * 셀 색을 저장하기 위해 추출은 xlsx-js-style(SheetJS 호환 + 스타일)로 쓴다. 파일 읽기는 SheetJS 그대로.
  */
 
 type Cell = string | number | null;
@@ -76,6 +77,13 @@ function setFormat(X: XLSX, ws: XLSXTypes.WorkSheet, r: number, c: number, z: st
   const cell = ws[X.utils.encode_cell({ r, c })];
   if (cell && typeof cell.v === 'number') cell.z = z;
 }
+
+/** 마지막 입금월 강조 (보라색) */
+export const LAST_PAID_STYLE = {
+  fill: { patternType: 'solid', fgColor: { rgb: 'C9A7F0' } },
+  font: { bold: true, color: { rgb: '3B0764' } },
+  alignment: { horizontal: 'center' },
+};
 
 function merge(s: [number, number], e: [number, number]): XLSXTypes.Range {
   return { s: { r: s[0], c: s[1] }, e: { r: e[0], c: e[1] } };
@@ -145,7 +153,8 @@ function advisorySheet(X: XLSX, clients: Client[], allocations: GridAllocation[]
   const FIRST = 8; // I열
   const managerCol = FIRST + yearList.length * 12;
 
-  const row1: Cell[] = ['[ 매 출 ]-회원사'];
+  const row1: Cell[] = ['[ 매 출 ]-회원사', null, null, null, '■ 보라색 = 거래처별 마지막 입금월'];
+  const lastPaidCells: { r: number; c: number }[] = [];
   const row2: Cell[] = ['연번', '계약기간', null, null, '회     원     사', '계약금액', '계약형태', '입금예상일'];
   const row3: Cell[] = [null, null, null, null, null, null, null, null];
   yearList.forEach((y, i) => {
@@ -179,6 +188,12 @@ function advisorySheet(X: XLSX, clients: Client[], allocations: GridAllocation[]
         r[FIRST + i * 12 + m - 1] = dates ? dates.join(',') : null;
       }
     });
+    // 입금이 있는 가장 마지막 월 (연도 무관)
+    const last = [...months.keys()].sort().pop();
+    if (last) {
+      const yi = yearList.indexOf(Number(last.slice(0, 4)));
+      if (yi >= 0) lastPaidCells.push({ r: 3 + idx, c: FIRST + yi * 12 + Number(last.slice(5, 7)) - 1 });
+    }
     r[managerCol] = c.manager ?? null;
     return r;
   });
@@ -204,6 +219,12 @@ function advisorySheet(X: XLSX, clients: Client[], allocations: GridAllocation[]
     { wch: 7 },
   ];
   body.forEach((_, i) => setFormat(X, ws, 3 + i, 5, '#,##0'));
+  for (const { r, c } of lastPaidCells) {
+    const cell = ws[X.utils.encode_cell({ r, c })];
+    if (cell) (cell as XLSXTypes.CellObject & { s?: unknown }).s = LAST_PAID_STYLE;
+  }
+  const legend = ws['E1'] as (XLSXTypes.CellObject & { s?: unknown }) | undefined;
+  if (legend) legend.s = { font: { bold: true, color: { rgb: '6B21A8' } } };
   ws['!freeze'] = { xSplit: FIRST, ySplit: 3 };
   return ws;
 }
@@ -239,7 +260,8 @@ export function buildWorkbook(X: XLSX, data: ExportResponse, year: number | null
 }
 
 export async function downloadWorkbook(data: ExportResponse, year: number | null): Promise<string> {
-  const X = await import('xlsx');
+  const mod = (await import('xlsx-js-style')) as unknown as XLSX & { default?: XLSX };
+  const X = mod.default ?? mod;
   const d = new Date();
   const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
   const filename = `노무자문관리_${year === null ? '전체' : `${year}년`}_${stamp}.xlsx`;
