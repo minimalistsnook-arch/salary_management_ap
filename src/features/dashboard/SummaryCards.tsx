@@ -8,7 +8,7 @@ export function SummaryCards({ data, active, onSelect }: { data: DashboardRespon
   const cards: { key: SummaryKey; label: string; value: string; unit: string; tone: string }[] = [
     { key: 'monthDeposit', label: `이번 달 총 입금${m ? ` (${Number(m)}월)` : ''}`, value: won(data?.monthDeposit), unit: '원', tone: 'text-slate-900' },
     { key: 'monthWithdrawal', label: '이번 달 총 출금', value: won(data?.monthWithdrawal), unit: '원', tone: 'text-slate-900' },
-    { key: 'unmatched', label: '미매칭 거래', value: won(data?.unmatchedCount), unit: '건', tone: data?.unmatchedCount ? 'text-rose-700' : 'text-slate-900' },
+    { key: 'unmatched', label: '개별건 (매칭 안 된 입금)', value: won(data?.unmatchedCount), unit: '건', tone: data?.unmatchedCount ? 'text-rose-700' : 'text-slate-900' },
     { key: 'partial', label: '부분납 거래', value: won(data?.partialTxCount), unit: '건', tone: data?.partialTxCount ? 'text-amber-700' : 'text-slate-900' },
     { key: 'unpaidClients', label: '미납 거래처', value: won(data?.unpaidClientCount), unit: '곳', tone: data?.unpaidClientCount ? 'text-rose-700' : 'text-slate-900' },
   ];

@@ -8,7 +8,7 @@ export const summaryLink = (k: SummaryKey) =>
   ({
     monthDeposit: '/transactions?period=this-month&dir=deposit',
     monthWithdrawal: '/transactions?period=this-month&dir=withdrawal',
-    unmatched: '/transactions?match=NEEDS_REVIEW',
+    unmatched: '/case-fee',
     partial: '/transactions?partial=1',
     unpaidClients: '/advisory?filter=UNPAID',
   })[k];

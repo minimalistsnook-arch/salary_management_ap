@@ -8,7 +8,10 @@ const responses: Record<string, unknown> = {
   '/api/clients': { clients: [client], aliases: [] },
   '/api/clients/sync-status': { lastSuccess: null, lastAttempt: { created_at: '2026-09-24T00:00:00Z', status: 'FAILED', message: 'network' } },
   '/api/dashboard': { currentMonth: '2026-09', monthDeposit: 440000, monthWithdrawal: 0, unmatchedCount: 1, partialTxCount: 0, unpaidClientCount: 1, clientCount: 1, lastImport: null },
-  '/api/transactions': [],
+  '/api/transactions': [
+    { id: 1, import_batch_id: 1, excel_row_number: 2, bank_row_no: '1', transaction_datetime: '2026-09-24 10:00:00', sender_raw: '남산운수 주식회사', withdrawal_amount: 0, deposit_amount: 220000, transaction_hash: 'a', created_at: '', filename: 'a.xlsx', client_id: 1, client_name: '남산운수마을버스㈜', contract_amount: 220000, similarity_score: 80, match_type: 'MANUAL', match_status: 'MANUAL_MATCHED', note: null, allocations: [] },
+    { id: 2, import_batch_id: 1, excel_row_number: 3, bank_row_no: '2', transaction_datetime: '2026-09-24 11:00:00', sender_raw: '홍길동상회', withdrawal_amount: 0, deposit_amount: 50000, transaction_hash: 'b', created_at: '', filename: 'a.xlsx', client_id: null, client_name: null, contract_amount: null, similarity_score: 30, match_type: 'NONE', match_status: 'UNMATCHED', note: null, allocations: [] },
+  ],
   '/api/advisory': {
     year: 2026,
     currentMonth: '2026-09',
@@ -75,4 +78,11 @@ test('개별건: 매칭되지 않은 입금 목록 + 40% 이상 유사 표시', 
   expect(await screen.findByText('남산상운')).toBeDefined();
   expect(screen.getByText('45%')).toBeDefined();
   expect(screen.getAllByText('유사').filter((el) => el.closest('td'))).toHaveLength(1);
+});
+
+test('거래처 입출금내역정리에는 확정된 입금만, 매칭 안 된 입금은 개별건으로 안내', async () => {
+  renderAt('/transactions?year=2026');
+  expect(await screen.findByText('남산운수 주식회사')).toBeDefined();
+  expect(screen.queryByText('홍길동상회')).toBeNull();
+  expect(screen.getByText(/매칭 안 된 입금 1건/)).toBeDefined();
 });

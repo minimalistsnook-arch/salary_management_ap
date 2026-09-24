@@ -4,6 +4,7 @@ import { INDIVIDUAL_SIMILAR_THRESHOLD } from '../../domain/matching';
 import { normalizeName } from '../../domain/normalize';
 import { api } from '../../services/api';
 import { Badge, Button, Card, cx, EmptyState, ErrorBox, inputBase, Notice, SegmentedControl, Spinner, useAsync, won } from '../common/ui';
+import { BulkActionBar } from '../transactions/BulkActionBar';
 import { TransactionDrawer } from '../transactions/TransactionDrawer';
 
 type SimFilter = 'all' | 'similar' | 'none';
@@ -13,7 +14,15 @@ type SimFilter = 'all' | 'similar' | 'none';
  * 유사도 40% 이상 거래처가 있으면 표시한다. 거래처를 지정하면 이 목록에서 빠지고 월분 배정된다.
  */
 export function IndividualCasesPage() {
-  const { dataVersion, bumpData } = useApp();
+  const { dataVersion, bumpData, clients } = useApp();
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const toggle = (id: number, on: boolean) =>
+    setSel((s) => {
+      const n = new Set(s);
+      if (on) n.add(id);
+      else n.delete(id);
+      return n;
+    });
   const thisYear = new Date().getFullYear();
   const [year, setYear] = useState<string>('all');
   const [sim, setSim] = useState<SimFilter>('all');
@@ -41,9 +50,9 @@ export function IndividualCasesPage() {
   return (
     <div className="space-y-4">
       <Notice>
-        통장 Excel에서 <b>거래처에 매칭되지 않은 입금</b>(미매칭·확인필요)이 모두 여기에 모입니다. 거래처와 유사도 <b>{INDIVIDUAL_SIMILAR_THRESHOLD}% 이상</b>인 건은
-        <span className="mx-1 rounded bg-amber-100 px-1.5 text-amber-900">유사</span>로 표시됩니다. [거래처 지정]을 하면 노무자문비로 배정되고 이 목록에서 빠집니다. 개별건 수수료 규칙은 다음 단계에서
-        추가됩니다.
+        통장 Excel에서 <b>거래처에 매칭되지 않은 입금</b>(미매칭·확인필요·매칭률 낮음·CMS 등)은 모두 여기에만 있습니다. 거래처와 유사도 <b>{INDIVIDUAL_SIMILAR_THRESHOLD}% 이상</b>인 건은
+        <span className="mx-1 rounded bg-amber-100 px-1.5 text-amber-900">유사</span>로 표시됩니다. V로 선택해 거래처로 확정하면 노무자문비로 배정되고 <b>1. 거래처 입출금내역정리</b>로 옮겨집니다.
+        매칭률이 낮은 건은 자동 확정되지 않고 이곳에 남습니다.
       </Notice>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -87,6 +96,9 @@ export function IndividualCasesPage() {
               ]}
             />
             <input className={cx(inputBase, 'w-52')} placeholder="통장명 · 거래처 검색" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Button size="sm" onClick={() => setSel(new Set(rows.filter((r) => r.client_id != null && !r.excluded && !r.isGeneric).map((r) => r.id)))}>
+              V 추천 거래처 있는 건 선택 ({rows.filter((r) => r.client_id != null && !r.excluded && !r.isGeneric).length})
+            </Button>
           </>
         }
       >
@@ -100,7 +112,15 @@ export function IndividualCasesPage() {
             <table className="w-full min-w-[1000px] text-sm">
               <thead className="bg-slate-50 text-xs whitespace-nowrap text-slate-500">
                 <tr className="text-left">
-                  <th className="px-3 py-2">거래일시</th>
+                  <th className="w-8 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      aria-label="전체 선택"
+                      checked={rows.length > 0 && rows.every((r) => sel.has(r.id))}
+                      onChange={(e) => setSel(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())}
+                    />
+                  </th>
+                  <th className="px-2 py-2">거래일시</th>
                   <th className="px-2 py-2">통장 원본명</th>
                   <th className="px-2 py-2 text-right">입금액</th>
                   <th className="px-2 py-2">유사 거래처</th>
@@ -113,8 +133,11 @@ export function IndividualCasesPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {rows.map((r) => (
-                  <tr key={r.id} className={cx(r.similar && 'bg-amber-50/60')}>
-                    <td className="px-3 py-2 whitespace-nowrap tabular-nums">{r.transaction_datetime.slice(0, 16)}</td>
+                  <tr key={r.id} className={cx(r.similar && 'bg-amber-50/60', sel.has(r.id) && 'bg-blue-50/70')}>
+                    <td className="px-3 py-2">
+                      <input type="checkbox" aria-label="선택" checked={sel.has(r.id)} onChange={(e) => toggle(r.id, e.target.checked)} />
+                    </td>
+                    <td className="px-2 py-2 whitespace-nowrap tabular-nums">{r.transaction_datetime.slice(0, 16)}</td>
                     <td className="px-2 py-2 font-medium">{r.sender_raw}</td>
                     <td className="px-2 py-2 text-right font-medium tabular-nums">{won(r.deposit_amount)}</td>
                     <td className="px-2 py-2">
@@ -130,6 +153,7 @@ export function IndividualCasesPage() {
                       ) : (
                         <span className="text-xs text-slate-400">유사 거래처 없음</span>
                       )}
+                      {r.client_name && !r.excluded && !r.isGeneric && <div className="text-xs text-blue-800">확정 시 → {r.client_name}</div>}
                     </td>
                     <td className={cx('px-2 py-2 text-right tabular-nums', r.similar ? 'font-medium text-amber-800' : 'text-slate-400')}>
                       {r.bestCandidate && !r.isGeneric && !r.excluded ? `${r.bestCandidate.score}%` : '-'}
@@ -153,6 +177,17 @@ export function IndividualCasesPage() {
           </div>
         )}
       </Card>
+
+      <BulkActionBar
+        selected={[...sel]}
+        rows={data ?? []}
+        clients={clients}
+        onClear={() => setSel(new Set())}
+        onDone={() => {
+          setSel(new Set());
+          bumpData();
+        }}
+      />
 
       {openId !== null && <TransactionDrawer id={openId} onClose={() => setOpenId(null)} onChanged={bumpData} />}
     </div>

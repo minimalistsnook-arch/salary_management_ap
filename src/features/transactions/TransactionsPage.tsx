@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApp } from '../../app/AppContext';
 import type { TransactionRow } from '../../domain/dto';
-import { MATCH_STATUS_LABEL, PAYMENT_STATUS_LABEL } from '../../domain/labels';
+import { isIndividualCase, MATCH_STATUS_LABEL, PAYMENT_STATUS_LABEL } from '../../domain/labels';
 import { currentYearMonth } from '../../domain/month';
 import { normalizeName } from '../../domain/normalize';
 import type { MatchStatus, PaymentStatus } from '../../domain/types';
@@ -37,6 +37,9 @@ export function TransactionsPage() {
   const match = params.get('match') ?? '';
   const partial = params.get('partial') === '1';
   const clientFilter = params.get('client') ?? '';
+  useEffect(() => {
+    if (params.get('match') === 'NEEDS_REVIEW' || params.get('match') === 'REVIEW_REQUIRED' || params.get('match') === 'UNMATCHED') navigate('/case-fee', { replace: true });
+  }, [params, navigate]);
   const [q, setQ] = useState('');
   const [view, setView] = useState<View>('list');
   const [openId, setOpenId] = useState<number | null>(null);
@@ -66,15 +69,17 @@ export function TransactionsPage() {
   const dash = useAsync(() => api.dashboard(), [dataVersion]);
   const advisory = useAsync(() => (view === 'list' ? Promise.resolve(null) : api.advisory(Number(effectiveYear === 'all' ? now.slice(0, 4) : effectiveYear))), [view, effectiveYear, dataVersion]);
 
+  // 매칭되지 않은 입금은 '3. 개별건'으로 — 여기에는 거래처로 확정된 입금(과 출금)만
+  const ledgerRows = useMemo(() => (txs.data ?? []).filter((t) => !isIndividualCase(t)), [txs.data]);
+  const individualCount = (txs.data ?? []).length - ledgerRows.length;
+
   const filtered = useMemo(() => {
     const nq = normalizeName(q);
-    return (txs.data ?? []).filter((t) => {
+    return ledgerRows.filter((t) => {
       if (month && t.transaction_datetime.slice(5, 7) !== month) return false;
       if (dir === 'deposit' && !(t.deposit_amount > 0)) return false;
       if (dir === 'withdrawal' && !(t.withdrawal_amount > 0)) return false;
-      if (match === 'NEEDS_REVIEW') {
-        if (!(t.deposit_amount > 0 && (t.match_status === 'UNMATCHED' || t.match_status === 'REVIEW_REQUIRED'))) return false;
-      } else if (match && t.match_status !== match) return false;
+      if (match && t.match_status !== match) return false;
       if (partial && !t.allocations.some((a) => a.month_status === 'PARTIAL')) return false;
       if (clientFilter && String(t.client_id ?? '') !== clientFilter) return false;
       if (q.trim()) {
@@ -83,11 +88,11 @@ export function TransactionsPage() {
       }
       return true;
     });
-  }, [txs.data, month, dir, match, partial, clientFilter, q]);
+  }, [ledgerRows, month, dir, match, partial, clientFilter, q]);
 
-  const activeCard: SummaryKey | null = params.get('period') === 'this-month' ? (dir === 'withdrawal' ? 'monthWithdrawal' : 'monthDeposit') : match === 'NEEDS_REVIEW' ? 'unmatched' : partial ? 'partial' : null;
+  const activeCard: SummaryKey | null = params.get('period') === 'this-month' ? (dir === 'withdrawal' ? 'monthWithdrawal' : 'monthDeposit') : partial ? 'partial' : null;
   const onCard = (k: SummaryKey) => {
-    if (k === 'unpaidClients') return navigate(summaryLink(k));
+    if (k === 'unpaidClients' || k === 'unmatched') return navigate(summaryLink(k));
     setParams(new URLSearchParams(summaryLink(k).split('?')[1]), { replace: true });
     setView('list');
   };
@@ -146,8 +151,7 @@ export function TransactionsPage() {
             매칭상태
             <select className={cx(inputBase, 'mt-0.5 w-32')} value={match} onChange={(e) => set({ match: e.target.value })}>
               <option value="">전체</option>
-              <option value="NEEDS_REVIEW">확인필요+미매칭 (입금)</option>
-              {(Object.keys(MATCH_STATUS_LABEL) as MatchStatus[]).map((s) => (
+              {(['AUTO_MATCHED', 'MANUAL_MATCHED'] as MatchStatus[]).map((s) => (
                 <option key={s} value={s}>
                   {MATCH_STATUS_LABEL[s]}
                 </option>
@@ -204,12 +208,11 @@ export function TransactionsPage() {
           }
           actions={
             <>
-              <Button
-                size="sm"
-                onClick={() => setSel(new Set(filtered.filter((t) => t.deposit_amount > 0 && t.match_status === 'REVIEW_REQUIRED' && t.client_id != null).map((t) => t.id)))}
-              >
-                V 추천 있는 확인필요 전체 선택 ({filtered.filter((t) => t.deposit_amount > 0 && t.match_status === 'REVIEW_REQUIRED' && t.client_id != null).length})
-              </Button>
+              {individualCount > 0 && (
+                <Button size="sm" onClick={() => navigate('/case-fee')} title="거래처에 매칭되지 않은 입금은 3. 개별건에서 확인·확정합니다">
+                  매칭 안 된 입금 {individualCount}건 → 개별건
+                </Button>
+              )}
               <Button size="sm" onClick={() => setSel(new Set(filtered.filter((t) => t.deposit_amount > 0).map((t) => t.id)))}>
                 V 입금 전체 선택
               </Button>
