@@ -228,6 +228,37 @@ export interface IndividualCaseRow extends TransactionRow {
   excluded: boolean;
 }
 
+// ---------- 마지막 입금 기준표 ----------
+export interface BaselinePreviewRow {
+  line: number;
+  seq: string;
+  name: string;
+  clientId: number | null;
+  clientName: string | null;
+  lastMonth: YearMonth | null;
+  lastDate: string | null;
+  /** BASELINE: 반영, NO_RECORD: 입금기록 없음(부가정보만), NO_CLIENT: 거래처를 찾지 못함 */
+  mode: 'BASELINE' | 'NO_RECORD' | 'NO_CLIENT';
+  /** 통장에 해당 날짜 입금이 없어 기존 기록으로 남기는 월분 */
+  baselineRecord: { month: YearMonth; date: string; amount: number } | null;
+  deposits: { id: number; date: string; sender: string; amount: number; wasConfirmed: boolean; before: YearMonth[]; after: YearMonth[] }[];
+  startMonth: YearMonth | null;
+  warnings: string[];
+}
+export interface BaselinePreviewResponse {
+  reference: string;
+  errors: string[];
+  rows: BaselinePreviewRow[];
+}
+export interface BaselineApplyResult {
+  clients: number;
+  baselineRecords: number;
+  deposits: number;
+  allocations: number;
+  metaOnly: number;
+  skipped: number;
+}
+
 export interface ExportResponse {
   year: number;
   currentMonth: YearMonth;

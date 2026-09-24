@@ -5,9 +5,10 @@ import type { Client } from '../../domain/types';
 import { api, errorMessage } from '../../services/api';
 import { StartMonthDialog } from '../advisory/AdvisoryPage';
 import { Badge, Button, Card, cx, EmptyState, ErrorBox, inputBase, localDateTime, SegmentedControl, toast, won } from '../common/ui';
+import { BaselinePanel } from './BaselinePanel';
 import { LegacyImportPanel } from './LegacyImportPanel';
 
-type Tab = 'clients' | 'aliases' | 'legacy' | 'rules';
+type Tab = 'clients' | 'aliases' | 'baseline' | 'legacy' | 'rules';
 
 export function SettingsPage() {
   const { clients, aliases, clientsError, reloadClients, syncStatus, syncing, runSync, bumpData } = useApp();
@@ -60,6 +61,7 @@ export function SettingsPage() {
         options={[
           { value: 'clients', label: `거래처 마스터 ${clients.length}` },
           { value: 'aliases', label: `통장 별칭 ${aliases.length}` },
+          { value: 'baseline', label: '마지막 입금 기준표' },
           { value: 'legacy', label: '기존 Excel(노무자문비) 가져오기' },
           { value: 'rules', label: '공통 입금명' },
         ]}
@@ -153,6 +155,7 @@ export function SettingsPage() {
         </Card>
       )}
 
+      {tab === 'baseline' && <BaselinePanel />}
       {tab === 'legacy' && <LegacyImportPanel />}
 
       {tab === 'rules' && (

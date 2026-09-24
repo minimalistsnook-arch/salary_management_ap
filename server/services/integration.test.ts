@@ -7,6 +7,7 @@ import type { ClientSourceAdapter } from './clientSync/adapters';
 import { syncClients } from './clientSync/clientSyncService';
 import { assignTransaction, setManualAllocations } from './paymentAllocation/allocationService';
 import { bulkTransactions } from './paymentAllocation/bulkService';
+import { applyBaseline, previewBaseline } from './baseline/baselineService';
 import { individualCases, listTransactions } from './query/queryService';
 
 const sheet = (rows: [string, string, string][]): ClientSourceAdapter => ({ name: 'test', fetchRows: async () => rows.map((r) => [...r]) });
@@ -237,6 +238,63 @@ describe('일괄 처리 (V 선택)', () => {
     expect(txs.find((t) => t.id === id[2])).toMatchObject({ match_status: 'REVIEW_REQUIRED', allocations: [] });
     expect(txs.find((t) => t.id === id[2])!.client_name).toBe('남산운수마을버스㈜'); // 추천은 유지
     expect(count(`SELECT COUNT(*) AS n FROM audit_logs WHERE action LIKE 'BULK_%'`)).toBe(6);
+  });
+});
+
+describe('마지막 입금 기준표', () => {
+  const table = [
+    '1    광일운수㈜    275,000    통장입금    10    7월분    08/19    영옥',
+    '2    청진운수㈜    165,000    CMS    10    7월분    09/10    영옥',
+    '3    남산운수마을버스㈜    220,000    통장입금    말일    입금기록 없음        민주',
+  ].join('\n');
+
+  test('통장 입금이 기준일과 같으면 그 입금 = 기준 월분, 이전은 거꾸로, 이후는 다음 월분 / 없으면 기존 기록', async () => {
+    await commitImport(db, {
+      filename: 'b.xlsx',
+      fileHash: '2'.repeat(64),
+      rows: [
+        row(2, '2026-08-18 16:29:00', '광일운수(주)', 275000),
+        row(3, '2026-08-19 10:29:00', '광일운수(주)', 275000),
+        row(4, '2026-08-19 10:29:30', '광일운수(주)', 275000),
+        row(5, '2026-09-15 11:12:00', '광일운수(주)', 275000),
+      ],
+      decisions: { 2: { selected: true }, 3: { selected: true }, 4: { selected: true }, 5: { selected: true } }, // 잘못된 기존 확정 (2026-05~)
+    });
+    const p = await previewBaseline(db, { text: table, reference: '2026-09-24' });
+    const kw = p.rows.find((r) => r.name === '광일운수㈜')!;
+    expect(kw.baselineRecord).toBeNull();
+    expect(kw.deposits.map((d) => [d.date, d.after])).toEqual([
+      ['2026-08-18', ['2026-05']],
+      ['2026-08-19', ['2026-06']],
+      ['2026-08-19', ['2026-07']],
+      ['2026-09-15', ['2026-08']],
+    ]);
+    const cj = p.rows.find((r) => r.name === '청진운수㈜')!;
+    expect(cj.baselineRecord).toEqual({ month: '2026-07', date: '2026-09-10', amount: 165000 });
+    expect(p.rows.find((r) => r.name === '남산운수마을버스㈜')!.mode).toBe('NO_RECORD');
+
+    const r1 = await applyBaseline(db, { text: table, reference: '2026-09-24' });
+    expect(r1).toMatchObject({ clients: 2, baselineRecords: 1, deposits: 4, metaOnly: 1 });
+    // 재적용해도 같은 결과 (중복 없음)
+    await applyBaseline(db, { text: table, reference: '2026-09-24' });
+    expect(count(`SELECT COUNT(*) AS n FROM payment_allocations WHERE client_id = ${clientIds['광일운수㈜']}`)).toBe(4);
+    expect(count(`SELECT COUNT(*) AS n FROM payment_allocations WHERE client_id = ${clientIds['청진운수㈜']}`)).toBe(1);
+    expect((db.raw.prepare('SELECT management_start_month AS m, manager, contract_type FROM clients WHERE id = ?').get(clientIds['광일운수㈜']) as Record<string, string>)).toEqual({
+      m: '2026-05',
+      manager: '영옥',
+      contract_type: '통장입금',
+    });
+
+    // 다음 통장 Excel 업로드 → 그다음 월분부터 자동
+    const next = await buildPreview(db, {
+      filename: 'next.xlsx',
+      fileHash: '1'.repeat(64),
+      rows: [row(2, '2026-10-10 10:00:00', '광일운수(주)', 275000), row(3, '2026-10-10 11:00:00', '청진운수주식회사', 165000)],
+    });
+    expect(next.rows.map((r) => [r.clientName, r.needsStartMonth, r.allocation.map((l) => l.serviceMonth)])).toEqual([
+      ['광일운수㈜', false, ['2026-09']],
+      ['청진운수㈜', false, ['2026-08']],
+    ]);
   });
 });
 

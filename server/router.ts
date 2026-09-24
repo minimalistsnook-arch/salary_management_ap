@@ -7,6 +7,7 @@ import { buildPreview, commitImport } from './services/bankImport/bankImportServ
 import { createClientSourceAdapter, type ClientSourceEnv } from './services/clientSync/adapters';
 import { getSyncStatus, syncClients } from './services/clientSync/clientSyncService';
 import { commitLegacy, previewLegacy } from './services/legacyImport/legacyImportService';
+import { applyBaseline, previewBaseline } from './services/baseline/baselineService';
 import { bulkTransactions } from './services/paymentAllocation/bulkService';
 import { assignTransaction, setManualAllocations, unassignTransaction, updateNote } from './services/paymentAllocation/allocationService';
 import { advisoryData, dashboard, exportData, individualCases, listBatches, listTransactions, transactionDetail } from './services/query/queryService';
@@ -97,6 +98,8 @@ const routes: [string, RegExp, Handler][] = [
   ['GET', /^\/api\/individual$/, ({ db, url }) => individualCases(db, url.searchParams.get('year') ? yearParam(url) : undefined)],
   // 노무자문비
   ['GET', /^\/api\/advisory$/, ({ db, url }) => advisoryData(db, yearParam(url))],
+  ['POST', /^\/api\/baseline\/preview$/, async ({ db, body }) => previewBaseline(db, await body())],
+  ['POST', /^\/api\/baseline\/apply$/, async ({ db, body }) => applyBaseline(db, await body())],
   ['POST', /^\/api\/legacy\/preview$/, async ({ db, body }) => previewLegacy(db, await body())],
   ['POST', /^\/api\/legacy\/commit$/, async ({ db, body }) => commitLegacy(db, await body())],
   // 전체 Excel 추출용 데이터

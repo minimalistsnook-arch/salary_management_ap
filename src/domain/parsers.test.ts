@@ -3,6 +3,7 @@ import { parseBankRows } from './bankExcelParser';
 import { interpretClientSheet, parseCsv } from './clientSheet';
 import { transactionFingerprint } from './fingerprint';
 import { inferPaymentDate, parseLegacyAdvisorySheet } from './legacyAdvisoryParser';
+import { parseBaselineTable } from './baselineTable';
 
 describe('통장 Excel 파서', () => {
   const header = ['번호', '거래일시', '보낸분/받는분', '출금액', '입금액'];
@@ -157,5 +158,29 @@ describe('기존 노무자문비 시트 가져오기', () => {
     expect(inferPaymentDate('2026-01', 12, 28)).toBe('2025-12-28');
     expect(inferPaymentDate('2026-05', 9, 24)).toBe('2026-09-24');
     expect(inferPaymentDate('2025-12', 1, 5)).toBe('2026-01-05');
+  });
+});
+
+describe('마지막 입금 기준표', () => {
+  test('공백/탭 구분, 이름 속 공백, 입금기록 없음, 선납·연체 연도', () => {
+    const text = [
+      '1    세인트팩㈜    110,000    CMS    20    8월분    08/21    민주',
+      '29    주식회사   새천년    165,000    통장입금    10    8월분    09/10    민주',
+      '50    2K 프린팅    110,000    CMS    말일    입금기록 없음        재원',
+      '3\t㈜피엔에이링크\t165,000\t통장입금\t말일\t9월분\t08/31\t자문',
+      '134    허브치과    110,000    CMS    10    1월분    09/11    재원',
+      '154    970(구칠공)    165,000    CMS    15    6월분    08/21    은혜',
+    ].join('\n');
+    const r = parseBaselineTable(text, '2026-09-24');
+    expect(r.errors).toEqual([]);
+    expect(r.rows.map((x) => [x.seq, x.name, x.contractAmount, x.lastMonth, x.lastDate, x.manager])).toEqual([
+      ['1', '세인트팩㈜', 110000, '2026-08', '2026-08-21', '민주'],
+      ['29', '주식회사 새천년', 165000, '2026-08', '2026-09-10', '민주'],
+      ['50', '2K 프린팅', 110000, null, null, '재원'],
+      ['3', '㈜피엔에이링크', 165000, '2026-09', '2026-08-31', '자문'],
+      ['134', '허브치과', 110000, '2026-01', '2026-09-11', '재원'],
+      ['154', '970(구칠공)', 165000, '2026-06', '2026-08-21', '은혜'],
+    ]);
+    expect(r.rows[0]).toMatchObject({ contractType: 'CMS', expectedPayDay: '20' });
   });
 });

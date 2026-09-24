@@ -16,6 +16,8 @@ import type {
   TransactionDetail,
   TransactionRow,
   BulkActionRequest,
+  BaselineApplyResult,
+  BaselinePreviewResponse,
   BulkActionResult,
 } from '../domain/dto';
 import type { Client, YearMonth } from '../domain/types';
@@ -78,6 +80,8 @@ export const api = {
 
   individual: (year?: number) => request<IndividualCaseRow[]>('GET', `/api/individual${year ? `?year=${year}` : ''}`),
   advisory: (year: number) => request<AdvisoryResponse>('GET', `/api/advisory?year=${year}`),
+  baselinePreview: (text: string) => request<BaselinePreviewResponse>('POST', '/api/baseline/preview', { text }),
+  baselineApply: (text: string) => request<BaselineApplyResult>('POST', '/api/baseline/apply', { text }),
   legacyPreview: (req: LegacyPreviewRequest) => request<LegacyPreviewResponse>('POST', '/api/legacy/preview', req),
   legacyCommit: (req: LegacyPreviewRequest) => request<LegacyCommitResponse>('POST', '/api/legacy/commit', req),
 
