@@ -1,0 +1,16 @@
+name = "labor-advisory-ledger"
+compatibility_date = "2025-09-01"
+pages_build_output_dir = "dist"
+
+[vars]
+# 거래처 마스터 Google Sheet (B열=거래처명, C열=월 계약금액)
+GOOGLE_SHEET_ID = "1m6LGkzyq6Hgu8749cleorE0K4gxFB8D4YA2xPawS2yQ"
+GOOGLE_SHEET_GID = "0"
+# csv(공개 링크) | api(Google Sheets API, GOOGLE_API_KEY secret 필요)
+CLIENT_SOURCE_MODE = "csv"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "labor-advisory-ledger"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
