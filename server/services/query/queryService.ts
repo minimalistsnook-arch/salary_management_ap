@@ -1,6 +1,7 @@
 import { outstandingMonths, type GridAllocation } from '../../../src/domain/advisoryGrid';
-import type { AdvisoryResponse, AuditLog, DashboardResponse, ExportResponse, ImportBatch, TransactionDetail } from '../../../src/domain/dto';
-import { buildMatchIndex, matchSender, type IndexAlias } from '../../../src/domain/matching';
+import type { AdvisoryResponse, AuditLog, DashboardResponse, ExportResponse, ImportBatch, IndividualCaseRow, TransactionDetail } from '../../../src/domain/dto';
+import { buildMatchIndex, INDIVIDUAL_SIMILAR_THRESHOLD, matchSender, type IndexAlias } from '../../../src/domain/matching';
+import { loadMatchIndex } from '../clientMatching/matchingService';
 import { currentYearMonth } from '../../../src/domain/month';
 import { AppError, all, first, type SqlDb } from '../../db';
 import { allocationsForClients, listAliases, listClients, queryTransactions } from '../../repos';
@@ -18,6 +19,22 @@ export async function transactionDetail(db: SqlDb, id: number): Promise<Transact
   const candidates = matchSender(transaction.sender_raw, buildMatchIndex(clients, aliases)).candidates;
   const audit = await all<AuditLog>(db, "SELECT * FROM audit_logs WHERE entity_type = 'transaction' AND entity_id = ? ORDER BY id DESC", id);
   return { transaction, candidates, audit };
+}
+
+/**
+ * 개별건: 거래처로 확정되지 않은 통장 입금 전체 (미매칭 + 확인필요).
+ * 거래처가 지정되면 자동으로 목록에서 빠진다. 유사 거래처는 현재 거래처/별칭 기준으로 다시 계산한다.
+ */
+export async function individualCases(db: SqlDb, year?: number): Promise<IndividualCaseRow[]> {
+  const where = "t.deposit_amount > 0 AND COALESCE(m.status, 'UNMATCHED') IN ('UNMATCHED', 'REVIEW_REQUIRED')";
+  const rows = year ? await queryTransactions(db, `${where} AND substr(t.transaction_datetime, 1, 4) = ?`, [String(year)]) : await queryTransactions(db, where);
+  if (!rows.length) return [];
+  const index = await loadMatchIndex(db);
+  return rows.map((t) => {
+    const m = matchSender(t.sender_raw, index);
+    const best = m.candidates[0] ?? null;
+    return { ...t, bestCandidate: best, similar: !!best && best.score >= INDIVIDUAL_SIMILAR_THRESHOLD, isGeneric: m.isGeneric };
+  });
 }
 
 export async function advisoryData(db: SqlDb, year: number): Promise<AdvisoryResponse> {
@@ -93,8 +110,8 @@ export function listBatches(db: SqlDb): Promise<ImportBatch[]> {
 }
 
 export async function exportData(db: SqlDb, year: number): Promise<ExportResponse> {
-  const [transactions, advisory, clients, batches] = await Promise.all([listTransactions(db), advisoryData(db, year), listClients(db), listBatches(db)]);
-  return { year, currentMonth: advisory.currentMonth, transactions, advisory, clients, batches };
+  const [transactions, advisory, clients, batches, individual] = await Promise.all([listTransactions(db), advisoryData(db, year), listClients(db), listBatches(db), individualCases(db)]);
+  return { year, currentMonth: advisory.currentMonth, transactions, individual, advisory, clients, batches };
 }
 
 export { listAliases };

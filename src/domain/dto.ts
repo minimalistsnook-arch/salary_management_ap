@@ -199,10 +199,19 @@ export interface LegacyCommitResponse {
   skippedMonths: number;
 }
 
+/** 개별건: 거래처에 매칭되지 않은 통장 입금 + 현재 기준 가장 비슷한 거래처 */
+export interface IndividualCaseRow extends TransactionRow {
+  bestCandidate: MatchCandidate | null;
+  /** bestCandidate 유사도가 40% 이상 */
+  similar: boolean;
+  isGeneric: boolean;
+}
+
 export interface ExportResponse {
   year: number;
   currentMonth: YearMonth;
   transactions: TransactionRow[];
+  individual: IndividualCaseRow[];
   advisory: AdvisoryResponse;
   clients: Client[];
   batches: ImportBatch[];

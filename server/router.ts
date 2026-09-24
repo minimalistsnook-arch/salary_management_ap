@@ -7,7 +7,7 @@ import { createClientSourceAdapter, type ClientSourceEnv } from './services/clie
 import { getSyncStatus, syncClients } from './services/clientSync/clientSyncService';
 import { commitLegacy, previewLegacy } from './services/legacyImport/legacyImportService';
 import { assignTransaction, setManualAllocations, unassignTransaction, updateNote } from './services/paymentAllocation/allocationService';
-import { advisoryData, dashboard, exportData, listBatches, listTransactions, transactionDetail } from './services/query/queryService';
+import { advisoryData, dashboard, exportData, individualCases, listBatches, listTransactions, transactionDetail } from './services/query/queryService';
 
 export interface Env extends ClientSourceEnv {
   DB: SqlDb;
@@ -90,6 +90,8 @@ const routes: [string, RegExp, Handler][] = [
     await updateNote(db, int(params[0]), note);
     return { ok: true };
   }],
+  // 개별건 (매칭되지 않은 입금)
+  ['GET', /^\/api\/individual$/, ({ db, url }) => individualCases(db, url.searchParams.get('year') ? yearParam(url) : undefined)],
   // 노무자문비
   ['GET', /^\/api\/advisory$/, ({ db, url }) => advisoryData(db, yearParam(url))],
   ['POST', /^\/api\/legacy\/preview$/, async ({ db, body }) => previewLegacy(db, await body())],

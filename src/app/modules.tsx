@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import { AdvisoryPage } from '../features/advisory/AdvisoryPage';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
+import { IndividualCasesPage } from '../features/individual/IndividualCasesPage';
 import { ImportHistoryPage } from '../features/imports/ImportHistoryPage';
 import { ComingSoonPage } from '../features/placeholder/ComingSoonPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
@@ -40,8 +41,7 @@ export const MODULES: AppModule[] = [
     label: '개별건 입금 및 수수료 관리',
     number: 3,
     section: 'main',
-    comingSoon: true,
-    Component: soon('개별건 입금 및 수수료 관리', '개별 건별 입금과 수수료 관리 기능은 다음 단계에서 제공됩니다.'),
+    Component: IndividualCasesPage,
   },
   { key: 'advisory', path: '/advisory', label: '노무 자문비 입출금 관련', number: 4, section: 'main', Component: AdvisoryPage },
   { key: 'settings', path: '/settings', label: '설정', section: 'bottom', Component: SettingsPage },

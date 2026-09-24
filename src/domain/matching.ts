@@ -4,6 +4,7 @@ import type { MatchStatus, MatchType } from './types';
 export const AUTO_MATCH_THRESHOLD = 70; // 70% 이상 → 자동 매칭 후보
 export const AMBIGUITY_GAP = 5; // 1·2위 차이 5% 미만 → 수동 확인
 export const REVIEW_FLOOR = 50; // 50~69% → 추천만 표시(확인필요), 그 미만 → 미매칭
+export const INDIVIDUAL_SIMILAR_THRESHOLD = 40; // 개별건 중 유사 거래처 표시 기준
 
 function levenshtein(a: string, b: string): number {
   const ac = [...a];

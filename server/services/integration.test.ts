@@ -6,7 +6,7 @@ import { buildPreview, commitImport } from './bankImport/bankImportService';
 import type { ClientSourceAdapter } from './clientSync/adapters';
 import { syncClients } from './clientSync/clientSyncService';
 import { assignTransaction, setManualAllocations } from './paymentAllocation/allocationService';
-import { listTransactions } from './query/queryService';
+import { individualCases, listTransactions } from './query/queryService';
 
 const sheet = (rows: [string, string, string][]): ClientSourceAdapter => ({ name: 'test', fetchRows: async () => rows.map((r) => [...r]) });
 const MASTER: [string, string, string][] = [
@@ -161,6 +161,34 @@ describe('통장 업로드 → 저장', () => {
       ['2026-08', 110000, 'PARTIAL'],
     ]);
     expect(after.note).toBe('거래처 요청');
+  });
+});
+
+describe('개별건', () => {
+  test('확정되지 않은 입금은 모두 개별건, 유사도 40% 이상 표시, 거래처 지정 시 제외', async () => {
+    await commitImport(db, {
+      filename: 'f.xlsx',
+      fileHash: '5'.repeat(64),
+      rows: [
+        row(2, '2026-09-24 10:00:00', '남산운수 주식회사', 440000),
+        row(3, '2026-09-24 11:00:00', 'CMS집금', 275000),
+        row(4, '2026-09-24 12:00:00', '홍길동', 50000),
+        row(5, '2026-09-24 13:00:00', '광일상사', 70000),
+        row(6, '2026-09-25 09:00:00', '사무실 임대료', 0, 500000),
+      ],
+      decisions: { 2: { selected: true } },
+    });
+    const list = await individualCases(db);
+    expect(list.map((r) => r.sender_raw).sort()).toEqual(['CMS집금', '광일상사', '홍길동']); // 확정건·출금 제외
+    const byName = Object.fromEntries(list.map((r) => [r.sender_raw, r]));
+    expect(byName['광일상사'].similar).toBe(true);
+    expect(byName['광일상사'].bestCandidate?.clientName).toBe('광일운수㈜');
+    expect(byName['광일상사'].bestCandidate!.score).toBeGreaterThanOrEqual(40);
+    expect(byName['홍길동'].similar).toBe(false);
+    expect(byName['CMS집금']).toMatchObject({ isGeneric: true });
+
+    await assignTransaction(db, byName['광일상사'].id, { clientId: clientIds['광일운수㈜'] });
+    expect((await individualCases(db)).map((r) => r.sender_raw)).not.toContain('광일상사');
   });
 });
 

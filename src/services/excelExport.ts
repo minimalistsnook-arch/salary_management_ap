@@ -98,6 +98,28 @@ export function buildWorkbook(XLSX: typeof XLSXTypes, data: ExportResponse): XLS
     '미매칭검토',
   );
 
+  // 3-1. 개별건 (매칭되지 않은 입금 전체, 유사도 40% 이상 표시)
+  XLSX.utils.book_append_sheet(
+    wb,
+    sheet(
+      XLSX,
+      ['거래일시', '통장 원본명', '입금액', '유사 거래처', '유사도', '유사 40% 이상', '상태', '비고', '업로드 파일'],
+      data.individual.map((t) => [
+        t.transaction_datetime,
+        t.sender_raw,
+        t.deposit_amount,
+        t.isGeneric ? '(공통 입금명)' : (t.bestCandidate?.clientName ?? null),
+        t.bestCandidate && !t.isGeneric ? t.bestCandidate.score / 100 : null,
+        t.similar ? '유사' : null,
+        MATCH_STATUS_LABEL[t.match_status],
+        t.note,
+        t.filename,
+      ]),
+      [19, 24, 12, 24, 8, 11, 10, 24, 28],
+    ),
+    '개별건',
+  );
+
   // 4. 거래처마스터
   XLSX.utils.book_append_sheet(
     wb,

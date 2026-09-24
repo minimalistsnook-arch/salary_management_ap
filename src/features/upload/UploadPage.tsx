@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../app/AppContext';
 import { parseBankRows, type BankParseResult } from '../../domain/bankExcelParser';
+import { INDIVIDUAL_SIMILAR_THRESHOLD } from '../../domain/matching';
 import type { ImportCommitResponse, ImportPreviewRequest, ImportPreviewResponse, PreviewRow, RowDecision } from '../../domain/dto';
 import { api, errorMessage } from '../../services/api';
 import { readExcelFile } from '../../services/excelRead';
@@ -186,7 +187,7 @@ export function UploadPage() {
     if (!req || !preview) return;
     const confirmedN = rows.filter((r) => r.selected).length;
     const newN = rows.filter((r) => !r.duplicate).length;
-    if (!window.confirm(`최종 저장합니다.\n\n신규 거래 ${newN}건 저장 (원본 보존)\n확정·월분 배정 ${confirmedN}건\n나머지는 '확인필요/미매칭'으로 저장되어 메뉴 1에서 처리할 수 있습니다.`)) return;
+    if (!window.confirm(`최종 저장합니다.\n\n신규 거래 ${newN}건 저장 (원본 보존)\n확정·월분 배정 ${confirmedN}건\n확정하지 않은 입금은 '3. 개별건'으로 이동하며, 거래처를 지정하면 배정됩니다.`)) return;
     setBusy('STEP 5 · 저장 중…');
     try {
       const res = await api.commitImport(req);
@@ -343,7 +344,7 @@ export function UploadPage() {
           <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
             <div className="text-sm text-slate-600">
               STEP 5 · 신규 {rows.filter((r) => !r.duplicate).length}건 저장 · <b className="text-emerald-700">확정 {rows.filter((r) => r.selected).length}건</b> (배정{' '}
-              {rows.filter((r) => r.selected).reduce((s, r) => s + r.allocation.length, 0)}개월) · 확인필요/미매칭 {rows.filter((r) => !r.duplicate && !r.selected && r.depositAmount > 0).length}건은 검토대기로 저장
+              {rows.filter((r) => r.selected).reduce((s, r) => s + r.allocation.length, 0)}개월) · 미확정 입금 {rows.filter((r) => !r.duplicate && !r.selected && r.depositAmount > 0).length}건은 개별건으로 이동
             </div>
             <Button variant="success" size="lg" onClick={() => void commit()} disabled={!!busy || rows.every((r) => r.duplicate)}>
               최종 저장
@@ -373,7 +374,7 @@ export function UploadPage() {
             <Button variant="primary" onClick={() => navigate('/transactions')}>
               거래처 입출금내역 보기
             </Button>
-            {result.pendingReview > 0 && <Button onClick={() => navigate('/transactions?match=NEEDS_REVIEW')}>검토대기 {result.pendingReview}건 처리</Button>}
+            {result.pendingReview > 0 && <Button onClick={() => navigate('/case-fee')}>개별건(미매칭) {result.pendingReview}건 보기</Button>}
             <Button onClick={reset}>다른 파일 업로드</Button>
           </div>
         </Card>
@@ -453,6 +454,12 @@ function PreviewTable({
                       <span className="text-slate-400">→ </span>
                       {r.clientName}
                       {r.contractAmount !== null && <div className="text-xs text-slate-500">월 {won(r.contractAmount)}원</div>}
+                    </div>
+                  ) : !r.duplicate && r.depositAmount > 0 && !r.autoMatch.isGeneric && (r.autoMatch.candidates[0]?.score ?? 0) >= INDIVIDUAL_SIMILAR_THRESHOLD ? (
+                    <div className="text-xs">
+                      <Badge tone="amber">유사</Badge> <span className="text-slate-700">{r.autoMatch.candidates[0].clientName}</span>{' '}
+                      <span className="text-amber-800">{r.autoMatch.candidates[0].score}%</span>
+                      <div className="text-slate-500">확정하지 않으면 개별건으로 이동</div>
                     </div>
                   ) : (
                     <span className="text-slate-400">-</span>

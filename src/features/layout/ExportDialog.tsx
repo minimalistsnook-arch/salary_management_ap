@@ -46,7 +46,7 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
           </select>
         </Field>
         <div className="rounded-md bg-slate-50 p-3 text-slate-600">
-          포함 시트: 거래처입출금내역 · 노무자문비 · 미매칭검토 · 거래처마스터 · 가져오기이력
+          포함 시트: 거래처입출금내역 · 노무자문비 · 미매칭검토 · 개별건 · 거래처마스터 · 가져오기이력
         </div>
       </div>
     </Overlay>

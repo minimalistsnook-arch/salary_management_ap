@@ -7,6 +7,7 @@ import type {
   ImportCommitResponse,
   ImportPreviewRequest,
   ImportPreviewResponse,
+  IndividualCaseRow,
   LegacyCommitResponse,
   LegacyPreviewRequest,
   LegacyPreviewResponse,
@@ -72,6 +73,7 @@ export const api = {
   unassign: (id: number) => request('POST', `/api/transactions/${id}/unassign`),
   setNote: (id: number, note: string) => request('POST', `/api/transactions/${id}/note`, { note }),
 
+  individual: (year?: number) => request<IndividualCaseRow[]>('GET', `/api/individual${year ? `?year=${year}` : ''}`),
   advisory: (year: number) => request<AdvisoryResponse>('GET', `/api/advisory?year=${year}`),
   legacyPreview: (req: LegacyPreviewRequest) => request<LegacyPreviewResponse>('POST', '/api/legacy/preview', req),
   legacyCommit: (req: LegacyPreviewRequest) => request<LegacyCommitResponse>('POST', '/api/legacy/commit', req),

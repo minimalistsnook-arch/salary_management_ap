@@ -19,6 +19,9 @@ const responses: Record<string, unknown> = {
     ],
   },
   '/api/imports': [],
+  '/api/individual': [
+    { id: 9, import_batch_id: 1, excel_row_number: 3, bank_row_no: '2', transaction_datetime: '2026-09-24 11:00:00', sender_raw: '남산상운', withdrawal_amount: 0, deposit_amount: 50000, transaction_hash: 'x', created_at: '', filename: 'a.xlsx', client_id: null, client_name: null, contract_amount: null, similarity_score: 0, match_type: 'NONE', match_status: 'UNMATCHED', note: null, allocations: [], bestCandidate: { clientId: 1, clientName: '남산운수마을버스㈜', score: 45 }, similar: true, isGeneric: false },
+  ],
 };
 
 beforeEach(() => {
@@ -43,7 +46,7 @@ test('사이드바 4개 대분류 + 준비중 표시, 상단 업로드/추출 �
   expect(screen.getByText('급여관리 수수료')).toBeDefined();
   expect(screen.getByText('개별건 입금 및 수수료 관리')).toBeDefined();
   expect(screen.getByText('노무 자문비 입출금 관련')).toBeDefined();
-  expect(screen.getAllByText('준비중')).toHaveLength(2);
+  expect(screen.getAllByText('준비중')).toHaveLength(1); // 2번만 준비중, 3번은 개별건 구현
   expect(screen.getAllByText(/통장내역 Excel 업로드/).length).toBeGreaterThan(0);
   expect(screen.getByText(/전체 Excel 추출/)).toBeDefined();
   expect(await screen.findByText(/거래처 정보 동기화 실패 \/ 마지막 성공: 없음/)).toBeDefined();
@@ -65,4 +68,11 @@ test('업로드 화면 STEP 표시', async () => {
   renderAt('/upload');
   expect(await screen.findByText(/STEP 1 · Excel 파싱/)).toBeDefined();
   expect(screen.getByText(/STEP 5 · 최종 저장/)).toBeDefined();
+});
+
+test('개별건: 매칭되지 않은 입금 목록 + 40% 이상 유사 표시', async () => {
+  renderAt('/case-fee');
+  expect(await screen.findByText('남산상운')).toBeDefined();
+  expect(screen.getByText('45%')).toBeDefined();
+  expect(screen.getAllByText('유사').filter((el) => el.closest('td'))).toHaveLength(1);
 });
