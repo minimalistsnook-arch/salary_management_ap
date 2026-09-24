@@ -131,3 +131,7 @@ yarn-error.log*
 .dev.vars
 .data
 .vite
+
+# 업로드용 은행/업무 Excel (개인·계좌 정보) — 커밋 금지
+/*.xls
+/*.xlsx

@@ -118,7 +118,9 @@ export function IndividualCasesPage() {
                     <td className="px-2 py-2 font-medium">{r.sender_raw}</td>
                     <td className="px-2 py-2 text-right font-medium tabular-nums">{won(r.deposit_amount)}</td>
                     <td className="px-2 py-2">
-                      {r.isGeneric ? (
+                      {r.excluded ? (
+                        <Badge tone="slate">시트 제외(x) 입금처</Badge>
+                      ) : r.isGeneric ? (
                         <span className="text-xs text-slate-500">공통 입금명 — 직접 선택</span>
                       ) : r.similar && r.bestCandidate ? (
                         <div>
@@ -130,7 +132,7 @@ export function IndividualCasesPage() {
                       )}
                     </td>
                     <td className={cx('px-2 py-2 text-right tabular-nums', r.similar ? 'font-medium text-amber-800' : 'text-slate-400')}>
-                      {r.bestCandidate && !r.isGeneric ? `${r.bestCandidate.score}%` : '-'}
+                      {r.bestCandidate && !r.isGeneric && !r.excluded ? `${r.bestCandidate.score}%` : '-'}
                     </td>
                     <td className="px-2 py-2">{r.match_status === 'REVIEW_REQUIRED' ? <Badge tone="amber">확인필요</Badge> : <Badge tone="red">미매칭</Badge>}</td>
                     <td className="max-w-40 truncate px-2 py-2 text-xs text-slate-600" title={r.note ?? ''}>

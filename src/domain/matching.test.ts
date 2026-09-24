@@ -74,7 +74,7 @@ describe('거래처 매칭', () => {
   });
 
   test('CASE 9: CMS집금 → 자동 거래처 지정 금지, REVIEW_REQUIRED', () => {
-    for (const s of ['CMS집금', 'cms 집금', '카드결제', '카드밴넷', '신한', '입금', '자동이체']) {
+    for (const s of ['CMS집금', 'cms 집금', '카드결제', '카드밴넷', '신한', '입금', '자동이체', '신한13006826']) {
       const r = matchSender(s, index);
       expect(r.status).toBe('REVIEW_REQUIRED');
       expect(r.clientId).toBeNull();
@@ -112,5 +112,22 @@ describe('거래처 매칭', () => {
     const idx = buildMatchIndex(clients, [{ normalized_sender: normalizeName('김대표'), client_id: 2, raw_sender: '김대표', source: 'MANUAL' }]);
     expect(matchSender('김대표', idx).clientId).toBe(2);
     expect(matchSender('김대호', idx).clientId).not.toBe(2);
+  });
+
+  test('업종명만 같고 고유 이름이 다르면 자동매칭하지 않음 (경원여객자동차 ≠ 삼성여객자동차)', () => {
+    expect(similarity('경원여객자동차(주)', '삼성여객자동차㈜')).toBeLessThan(50);
+    expect(similarity('남산운수', '남경운수')).toBeLessThan(70);
+    // 같은 회사의 표기 차이는 그대로 높은 점수
+    expect(similarity('신수환경　주식회사', '신수환경')).toBe(100);
+    expect(similarity('화영운수주', '화영운수㈜')).toBeGreaterThanOrEqual(90);
+    expect(similarity('완산정판8월', '(주)완산정판')).toBeGreaterThanOrEqual(80);
+    expect(similarity('남산운수 주식회사', '남산운수마을버스㈜')).toBeGreaterThanOrEqual(70);
+  });
+
+  test("시트에서 x(제외) 표시한 입금처는 자동매칭 금지 → 미매칭(개별건)", () => {
+    const idx = buildMatchIndex([...clients, { id: 30, name: '삼성여객자동차㈜' }], [], [normalizeName('경원여객')]);
+    const r = matchSender('경원여객자동차(주)', idx);
+    expect(r).toMatchObject({ status: 'UNMATCHED', clientId: null, excluded: true });
+    expect(matchSender('삼성여객자동차(주)', idx).status).toBe('AUTO_MATCHED');
   });
 });

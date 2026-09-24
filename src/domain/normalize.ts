@@ -80,11 +80,13 @@ export const GENERIC_SENDER_NAMES = [
 
 const GENERIC_SET = new Set(GENERIC_SENDER_NAMES.map((n) => normalizeName(n)));
 const GENERIC_PREFIX_RE = /^(cms|카드|펌뱅킹|가상계좌)/;
+// 은행명 + 숫자 (예: '신한13006826') — 카드/집금 정산 등 공통 입금
+const BANK_CODE_RE = /^(신한|국민|우리|하나|농협|기업|수협|신협|새마을|우체국|카카오|토스|케이뱅크|sc|씨티|부산|대구|경남|광주|전북|제주)\d{4,}$/;
 
 export function isGenericSender(raw: string | null | undefined): boolean {
   const n = normalizeName(raw);
   if (!n) return true;
-  return GENERIC_SET.has(n) || GENERIC_PREFIX_RE.test(n);
+  return GENERIC_SET.has(n) || GENERIC_PREFIX_RE.test(n) || BANK_CODE_RE.test(n);
 }
 
 /** 수동 확정한 통장 표기명을 alias로 저장해도 되는가 */

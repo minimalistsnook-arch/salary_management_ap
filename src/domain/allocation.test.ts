@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { allocatePayment, applyToLedger, buildLedger, oldestUnpaidMonth, type Ledger } from './allocation';
-import { feeWarning } from './feeCheck';
+import { feeWarning, largeDepositWarning } from './feeCheck';
 import { addMonths } from './month';
 
 const empty = (): Ledger => new Map();
@@ -83,5 +83,13 @@ describe('수수료 차감 가능성 경고', () => {
     expect(feeWarning(440000, 220000)).toBeNull();
     expect(feeWarning(330000, 220000)).toBeNull();
     expect(feeWarning(110000, 220000)).toBeNull();
+  });
+});
+
+describe('큰 금액 입금 경고', () => {
+  test('계약금액의 4개월분 이상이면 경고 (자동 보정·차단 없음)', () => {
+    expect(largeDepositWarning(3300000, 220000)).toMatch(/15개월분/);
+    expect(largeDepositWarning(880000, 220000)).toMatch(/4개월분/);
+    expect(largeDepositWarning(660000, 220000)).toBeNull();
   });
 });

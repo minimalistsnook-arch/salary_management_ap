@@ -2,6 +2,7 @@ import { isYearMonth } from '../src/domain/month';
 import { auditStmt } from './audit';
 import { AppError, first, nowIso, type SqlDb } from './db';
 import { getClient, listAliases, listClients } from './repos';
+import { ensureSchema } from './schemaGuard';
 import { buildPreview, commitImport } from './services/bankImport/bankImportService';
 import { createClientSourceAdapter, type ClientSourceEnv } from './services/clientSync/adapters';
 import { getSyncStatus, syncClients } from './services/clientSync/clientSyncService';
@@ -103,6 +104,11 @@ const routes: [string, RegExp, Handler][] = [
 export async function handleApi(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (!env.DB) return json({ error: 'D1 데이터베이스(DB 바인딩)가 연결되지 않았습니다.' }, 500);
+  try {
+    await ensureSchema(env.DB);
+  } catch (e) {
+    return json({ error: 'DB 스키마를 확인할 수 없습니다. D1 migration 적용 여부를 확인해주세요.', details: String(e) }, 500);
+  }
   for (const [method, re, handler] of routes) {
     const m = re.exec(url.pathname);
     if (!m || method !== request.method) continue;

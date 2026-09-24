@@ -1,3 +1,12 @@
+/** 이 개월 수 이상을 한 번에 입금하면 다른 수수료 포함 여부 확인 */
+export const LARGE_DEPOSIT_MONTHS = 4;
+
+/** 계약금액의 여러 배 입금 (선납 또는 급여관리/개별건 수수료가 섞였을 가능성) — 경고만 */
+export function largeDepositWarning(amount: number, contractAmount: number): string | null {
+  if (contractAmount <= 0 || amount < contractAmount * LARGE_DEPOSIT_MONTHS) return null;
+  return `계약금액의 약 ${Math.floor(amount / contractAmount)}개월분 — 선납인지, 다른 수수료가 포함됐는지 확인`;
+}
+
 /**
  * 계약금액과 입금액의 작은 차이를 경고만 한다. (자동 보정하지 않음)
  * 허용 오차: 계약금액의 5% 또는 1,000원 중 큰 값

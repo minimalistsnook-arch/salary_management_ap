@@ -5,11 +5,16 @@ import { listClients } from '../../repos';
 
 /** 활성 거래처 + alias 로 매칭 인덱스 구성 */
 export async function loadMatchIndex(db: SqlDb): Promise<MatchIndex> {
-  const [clients, aliases] = await Promise.all([
+  const [clients, aliases, exclusions] = await Promise.all([
     listClients(db, true),
     all<IndexAlias>(db, 'SELECT normalized_sender, client_id, raw_sender, source FROM client_aliases'),
+    all<{ normalized_sender: string }>(db, 'SELECT normalized_sender FROM sender_exclusions'),
   ]);
-  return buildMatchIndex(clients, aliases);
+  return buildMatchIndex(
+    clients,
+    aliases,
+    exclusions.map((e) => e.normalized_sender),
+  );
 }
 
 export function matchWithIndex(senderRaw: string, index: MatchIndex): MatchResult {

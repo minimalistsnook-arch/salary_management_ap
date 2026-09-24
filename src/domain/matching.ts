@@ -45,12 +45,45 @@ function dice(a: string, b: string): number {
 }
 
 /**
- * 정규화된 두 이름의 유사도 (0~100 정수, 내림).
- * 은행 통장 표기는 글자수 제한으로 앞부분만 남는 경우가 많아 접두 포함을 가산한다.
+ * 흔한 업종/형태 표기. 이 부분만 같은 이름(예: 경원여객자동차 / 삼성여객자동차)이
+ * 높은 점수를 받지 않도록, 이를 뺀 '고유 이름'이 다르면 점수를 낮춘다.
  */
-export function similarityOfNormalized(na: string, nb: string): number {
-  if (!na || !nb) return 0;
-  if (na === nb) return 100;
+const COMMON_SUFFIXES = [
+  '여객자동차',
+  '마을버스',
+  '정형외과의원',
+  '정형외과',
+  '산부인과',
+  '한방병원',
+  '한의원',
+  '통증의학과',
+  '재활의학과',
+  '의원',
+  '병원',
+  '치과',
+  '자동차',
+  '여객',
+  '운수',
+  '교통',
+  '버스',
+  '운송',
+  '인쇄',
+  '기획',
+  '산업',
+  '상사',
+  '유통',
+  '인테리어',
+  '프린팅',
+];
+const CORE_PENALTY_MARGIN = 0.15;
+
+function coreName(n: string): string {
+  let s = n;
+  for (const w of COMMON_SUFFIXES) s = s.split(w).join('');
+  return s;
+}
+
+function rawSimilarity(na: string, nb: string): number {
   const la = [...na].length;
   const lb = [...nb].length;
   const [short, long, ls, ll] = la <= lb ? [na, nb, la, lb] : [nb, na, lb, la];
@@ -60,7 +93,27 @@ export function similarityOfNormalized(na: string, nb: string): number {
     if (long.startsWith(short)) contain = 0.6 + (0.4 * ls) / ll;
     else if (long.includes(short)) contain = 0.5 + (0.4 * ls) / ll;
   }
-  const score = Math.max(lev, dice(na, nb), contain);
+  return Math.max(lev, dice(na, nb), contain);
+}
+
+/**
+ * 정규화된 두 이름의 유사도 (0~100 정수, 내림).
+ * 은행 통장 표기는 글자수 제한으로 앞부분만 남는 경우가 많아 접두 포함을 가산한다.
+ */
+export function similarityOfNormalized(na: string, nb: string): number {
+  if (!na || !nb) return 0;
+  if (na === nb) return 100;
+  let score = rawSimilarity(na, nb);
+  // 한쪽이 다른 쪽을 포함하지 않는데 업종명을 뺀 고유 이름이 다르면 감점
+  const [short, long] = na.length <= nb.length ? [na, nb] : [nb, na];
+  if (!long.includes(short)) {
+    const ca = coreName(na);
+    const cb = coreName(nb);
+    if (ca && cb && (ca !== na || cb !== nb)) {
+      const core = ca === cb ? 1 : rawSimilarity(ca, cb);
+      score = Math.min(score, core + CORE_PENALTY_MARGIN);
+    }
+  }
   return Math.min(99, Math.floor(score * 100 + 1e-9));
 }
 
@@ -90,6 +143,8 @@ export interface MatchResult {
   candidates: MatchCandidate[];
   reason: string | null;
   isGeneric: boolean;
+  /** 거래처 시트에서 B열 'x' 로 제외 표시된 입금처 */
+  excluded?: boolean;
 }
 
 export interface MatchIndex {
@@ -97,6 +152,8 @@ export interface MatchIndex {
   clients: { id: number; name: string; normalized: string; sheetAliases: { raw: string; normalized: string }[] }[];
   /** normalized_sender → client_id */
   aliases: Map<string, number>;
+  /** 시트 A열에 있고 B열이 'x' 인 입금처 (정규화) */
+  exclusions: string[];
 }
 
 export interface IndexAlias {
@@ -112,7 +169,7 @@ export interface IndexAlias {
  * - 시트 A열 별칭(SHEET): 비슷하기만 해도 B열 거래처 후보로 유사도 비교
  *   (수동 확정으로 학습된 별칭은 개인명 등이 많아 정확 일치만 사용)
  */
-export function buildMatchIndex(clients: MatchableClient[], aliases: IndexAlias[]): MatchIndex {
+export function buildMatchIndex(clients: MatchableClient[], aliases: IndexAlias[], exclusions: string[] = []): MatchIndex {
   const sheetByClient = new Map<number, { raw: string; normalized: string }[]>();
   for (const a of aliases) {
     if (a.source !== 'SHEET' || !a.normalized_sender) continue;
@@ -121,6 +178,7 @@ export function buildMatchIndex(clients: MatchableClient[], aliases: IndexAlias[
   return {
     clients: clients.map((c) => ({ id: c.id, name: c.name, normalized: normalizeName(c.name), sheetAliases: sheetByClient.get(c.id) ?? [] })),
     aliases: new Map(aliases.map((a) => [a.normalized_sender, a.client_id])),
+    exclusions: exclusions.filter((e) => e.length >= 2),
   };
 }
 
@@ -170,6 +228,21 @@ export function matchSender(senderRaw: string, index: MatchIndex): MatchResult {
       candidates: [{ clientId: aliasClient.id, clientName: aliasClient.name, score: 100 }, ...candidates.filter((c) => c.clientId !== aliasClient.id)].slice(0, 5),
       reason: '등록된 별칭으로 매칭',
       isGeneric: false,
+    };
+  }
+
+  // 시트에서 x(제외) 표시한 입금처: 자동매칭하지 않고 개별건으로
+  const exclusion = index.exclusions.find((e) => normalized === e || normalized.startsWith(e));
+  if (exclusion) {
+    return {
+      status: 'UNMATCHED',
+      matchType: 'NONE',
+      clientId: null,
+      score: 0,
+      candidates,
+      reason: '거래처 시트에서 제외(x) 표시된 입금처입니다.',
+      isGeneric: false,
+      excluded: true,
     };
   }
 

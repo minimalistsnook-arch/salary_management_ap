@@ -105,7 +105,19 @@ export async function syncClients(db: SqlDb, adapter: ClientSourceAdapter): Prom
     );
   }
 
-  const message = `추가 ${added} · 변경 ${updated} · 비활성 ${deactivated} · 별칭 ${aliases}`;
+  // 시트 'x' 제외 입금처: 매 동기화마다 시트 기준으로 다시 작성
+  stmts.push(db.prepare("DELETE FROM sender_exclusions WHERE source = 'SHEET'"));
+  const exSeen = new Set<string>();
+  for (const ex of sheet.exclusions) {
+    const n = normalizeName(ex.rawSender);
+    if (n.length < 2 || exSeen.has(n)) continue;
+    exSeen.add(n);
+    stmts.push(
+      db.prepare("INSERT OR IGNORE INTO sender_exclusions (raw_sender, normalized_sender, source, created_at) VALUES (?, ?, 'SHEET', ?)").bind(ex.rawSender, n, now),
+    );
+  }
+
+  const message = `추가 ${added} · 변경 ${updated} · 비활성 ${deactivated} · 별칭 ${aliases} · 제외 ${exSeen.size}`;
   stmts.push(db.prepare("INSERT INTO sync_logs (source, status, message, client_count, created_at) VALUES (?, 'SUCCESS', ?, ?, ?)").bind(adapter.name, message, sheet.clients.length, now));
   try {
     await db.batch(stmts);

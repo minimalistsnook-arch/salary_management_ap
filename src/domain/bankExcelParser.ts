@@ -44,7 +44,13 @@ const ROLE_SYNONYMS: Record<ColumnRole, string[]> = {
 
 const REQUIRED: ColumnRole[] = ['datetime', 'sender', 'withdrawal', 'deposit'];
 
-const norm = (v: unknown) => cellText(v).normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+// 헤더 비교용: 공백 제거, 단위 표기 '(원)' 제거 (예: '출금액(원)' → '출금액')
+const norm = (v: unknown) =>
+  cellText(v)
+    .normalize('NFKC')
+    .replace(/\s+/g, '')
+    .replace(/\((원|₩|krw)\)$/i, '')
+    .toLowerCase();
 
 function colLetter(idx: number): string {
   let s = '';
@@ -113,6 +119,11 @@ export function parseBankRows(rows: unknown[][], firstRowNumber = 1): BankParseR
     const row = rows[i] ?? [];
     const excelRow = firstRowNumber + i;
     if (row.every((c) => cellText(c).trim() === '')) continue;
+    // 페이지 구분 등으로 중간에 다시 나오는 헤더 행
+    if (Object.keys(detectRoles(row)).length >= 3) {
+      warnings.push(`Excel ${excelRow}행: 반복된 헤더 행이라 건너뛰었습니다.`);
+      continue;
+    }
 
     const get = (role: ColumnRole) => (roles[role] === undefined ? undefined : row[roles[role] as number]);
     const rawDt = get('datetime');

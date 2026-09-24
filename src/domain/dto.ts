@@ -44,6 +44,8 @@ export interface PreviewRow extends ParsedBankRow {
   unallocated: number;
   allocationError: string | null;
   feeWarning: string | null;
+  /** 계약금액의 여러 배(4개월분 이상) 입금 */
+  amountWarning: string | null;
   selected: boolean;
   selectable: boolean;
   blockReason: string | null;
@@ -205,6 +207,8 @@ export interface IndividualCaseRow extends TransactionRow {
   /** bestCandidate 유사도가 40% 이상 */
   similar: boolean;
   isGeneric: boolean;
+  /** 시트에서 x(제외) 표시된 입금처 */
+  excluded: boolean;
 }
 
 export interface ExportResponse {

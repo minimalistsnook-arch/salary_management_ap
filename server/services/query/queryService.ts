@@ -1,6 +1,6 @@
 import { outstandingMonths, type GridAllocation } from '../../../src/domain/advisoryGrid';
 import type { AdvisoryResponse, AuditLog, DashboardResponse, ExportResponse, ImportBatch, IndividualCaseRow, TransactionDetail } from '../../../src/domain/dto';
-import { buildMatchIndex, INDIVIDUAL_SIMILAR_THRESHOLD, matchSender, type IndexAlias } from '../../../src/domain/matching';
+import { INDIVIDUAL_SIMILAR_THRESHOLD, matchSender } from '../../../src/domain/matching';
 import { loadMatchIndex } from '../clientMatching/matchingService';
 import { currentYearMonth } from '../../../src/domain/month';
 import { AppError, all, first, type SqlDb } from '../../db';
@@ -14,9 +14,7 @@ export function listTransactions(db: SqlDb, year?: number) {
 export async function transactionDetail(db: SqlDb, id: number): Promise<TransactionDetail> {
   const [transaction] = await queryTransactions(db, 't.id = ?', [id]);
   if (!transaction) throw new AppError('거래를 찾을 수 없습니다.', 404);
-  const clients = await listClients(db, true);
-  const aliases = await all<IndexAlias>(db, 'SELECT normalized_sender, client_id, raw_sender, source FROM client_aliases');
-  const candidates = matchSender(transaction.sender_raw, buildMatchIndex(clients, aliases)).candidates;
+  const candidates = matchSender(transaction.sender_raw, await loadMatchIndex(db)).candidates;
   const audit = await all<AuditLog>(db, "SELECT * FROM audit_logs WHERE entity_type = 'transaction' AND entity_id = ? ORDER BY id DESC", id);
   return { transaction, candidates, audit };
 }
@@ -33,7 +31,7 @@ export async function individualCases(db: SqlDb, year?: number): Promise<Individ
   return rows.map((t) => {
     const m = matchSender(t.sender_raw, index);
     const best = m.candidates[0] ?? null;
-    return { ...t, bestCandidate: best, similar: !!best && best.score >= INDIVIDUAL_SIMILAR_THRESHOLD, isGeneric: m.isGeneric };
+    return { ...t, bestCandidate: best, similar: !m.excluded && !m.isGeneric && !!best && best.score >= INDIVIDUAL_SIMILAR_THRESHOLD, isGeneric: m.isGeneric, excluded: !!m.excluded };
   });
 }
 

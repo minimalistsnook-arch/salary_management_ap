@@ -108,7 +108,7 @@ export function buildWorkbook(XLSX: typeof XLSXTypes, data: ExportResponse): XLS
         t.transaction_datetime,
         t.sender_raw,
         t.deposit_amount,
-        t.isGeneric ? '(공통 입금명)' : (t.bestCandidate?.clientName ?? null),
+        t.excluded ? '(시트 제외 x)' : t.isGeneric ? '(공통 입금명)' : (t.bestCandidate?.clientName ?? null),
         t.bestCandidate && !t.isGeneric ? t.bestCandidate.score / 100 : null,
         t.similar ? '유사' : null,
         MATCH_STATUS_LABEL[t.match_status],

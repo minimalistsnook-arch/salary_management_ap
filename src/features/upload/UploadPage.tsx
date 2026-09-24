@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../app/AppContext';
-import { parseBankRows, type BankParseResult } from '../../domain/bankExcelParser';
+import { parseBankRows, type BankParseResult, type ParsedBankRow } from '../../domain/bankExcelParser';
 import { INDIVIDUAL_SIMILAR_THRESHOLD } from '../../domain/matching';
 import type { ImportCommitResponse, ImportPreviewRequest, ImportPreviewResponse, PreviewRow, RowDecision } from '../../domain/dto';
 import { api, errorMessage } from '../../services/api';
 import { readExcelFile } from '../../services/excelRead';
-import { Badge, Button, Card, cx, EmptyState, ErrorBox, localDateTime, MatchBadge, Notice, ScoreText, SegmentedControl, Spinner, toast, won } from '../common/ui';
+import { Badge, Button, Card, cx, EmptyState, ErrorBox, inputBase, localDateTime, MatchBadge, Notice, ScoreText, SegmentedControl, Spinner, toast, won } from '../common/ui';
 import { RowEditor } from './RowEditor';
 
 const STEPS = ['Excel 파싱', '거래처 자동 매칭', '월별 자문료 자동 배정', '사용자 확인', '최종 저장'];
@@ -51,7 +51,10 @@ function rowState(r: PreviewRow): { label: string; tone: 'green' | 'amber' | 're
   return { label: '확인대기', tone: 'blue' };
 }
 
-const isWarning = (r: PreviewRow) => !r.duplicate && (!!r.feeWarning || !!r.duplicateSuspect || (!!r.allocationError && r.allocation.length > 0));
+/** 출금 건너뛰기: 입금이 있는 행만 가져온다 (출금 전용 행은 확인·저장하지 않음) */
+const depositOnly = (rows: ParsedBankRow[], skip: boolean) => (skip ? rows.filter((r) => r.depositAmount > 0) : rows);
+
+const isWarning = (r: PreviewRow) => !r.duplicate && (!!r.feeWarning || !!r.amountWarning || !!r.duplicateSuspect || (!!r.allocationError && r.allocation.length > 0));
 
 export function UploadPage() {
   const navigate = useNavigate();
@@ -67,12 +70,16 @@ export function UploadPage() {
   const [filter, setFilter] = useState<Filter>('all');
   const [editing, setEditing] = useState<PreviewRow | null>(null);
   const [result, setResult] = useState<ImportCommitResponse | null>(null);
+  /** 파싱 가능한 시트 목록 (파일당 한 시트만 가져온다) */
+  const [sheetOptions, setSheetOptions] = useState<{ name: string; result: BankParseResult }[]>([]);
+  const [bulkStart, setBulkStart] = useState('');
+  const [skipWithdrawals, setSkipWithdrawals] = useState(true);
 
   const step = result ? 6 : preview ? 4 : parse && !parse.errors.length ? 2 : 1;
 
   const request = useCallback(
-    (d: Record<number, RowDecision>): ImportPreviewRequest | null => (file && parse ? { filename: file.filename, fileHash: file.fileHash, rows: parse.rows, decisions: d } : null),
-    [file, parse],
+    (d: Record<number, RowDecision>): ImportPreviewRequest | null => (file && parse ? { filename: file.filename, fileHash: file.fileHash, rows: depositOnly(parse.rows, skipWithdrawals), decisions: d } : null),
+    [file, parse, skipWithdrawals],
   );
 
   const refresh = async (d: Record<number, RowDecision>) => {
@@ -98,6 +105,8 @@ export function UploadPage() {
     setResult(null);
     setError(null);
     setFilter('all');
+    setSheetOptions([]);
+    setBulkStart('');
     if (inputRef.current) inputRef.current.value = '';
   };
 
@@ -111,26 +120,61 @@ export function UploadPage() {
     setBusy('STEP 1 · Excel 파싱 중…');
     try {
       const wb = await readExcelFile(f);
-      let chosen: { sheet: string; result: BankParseResult } | null = null;
-      for (const s of wb.sheets) {
-        const r = parseBankRows(s.rows, s.firstRowNumber);
-        if (!r.errors.length) {
-          chosen = { sheet: s.name, result: r };
-          break;
-        }
-        if (!chosen || r.errors.length < chosen.result.errors.length) chosen = { sheet: s.name, result: r };
-      }
-      if (!chosen) throw new Error('Excel 파일에 시트가 없습니다.');
-      setFile({ filename: wb.filename, fileHash: wb.fileHash, sheet: chosen.sheet });
+      const parsed = wb.sheets.map((s) => ({ name: s.name, result: parseBankRows(s.rows, s.firstRowNumber) }));
+      if (!parsed.length) throw new Error('Excel 파일에 시트가 없습니다.');
+      // 오류 없는 시트 중 거래가 가장 많은 시트를 기본 선택
+      const valid = parsed.filter((p) => !p.result.errors.length).sort((a, b) => b.result.rows.length - a.result.rows.length);
+      setSheetOptions(valid);
+      const chosen = valid[0] ?? [...parsed].sort((a, b) => a.result.errors.length - b.result.errors.length)[0];
+      setFile({ filename: wb.filename, fileHash: wb.fileHash, sheet: chosen.name });
       setParse(chosen.result);
       if (chosen.result.errors.length) return;
       setBusy('STEP 2~3 · 거래처 매칭 및 월분 배정 계산 중…');
-      setPreview(await api.previewImport({ filename: wb.filename, fileHash: wb.fileHash, rows: chosen.result.rows, decisions: {} }));
+      setPreview(await api.previewImport({ filename: wb.filename, fileHash: wb.fileHash, rows: depositOnly(chosen.result.rows, skipWithdrawals), decisions: {} }));
     } catch (e) {
       setError(e);
     } finally {
       setBusy(null);
     }
+  };
+
+  const switchSheet = async (name: string) => {
+    const opt = sheetOptions.find((o) => o.name === name);
+    if (!opt || !file) return;
+    setFile({ ...file, sheet: name });
+    setParse(opt.result);
+    setDecisions({});
+    setChecked(new Set());
+    setBusy('시트 변경 · 매칭 및 배정 다시 계산 중…');
+    try {
+      setPreview(await api.previewImport({ filename: file.filename, fileHash: file.fileHash, rows: depositOnly(opt.result.rows, skipWithdrawals), decisions: {} }));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const toggleSkip = async (skip: boolean) => {
+    setSkipWithdrawals(skip);
+    if (!file || !parse) return;
+    setDecisions({});
+    setChecked(new Set());
+    setBusy('다시 계산 중…');
+    try {
+      setPreview(await api.previewImport({ filename: file.filename, fileHash: file.fileHash, rows: depositOnly(parse.rows, skip), decisions: {} }));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const applyBulkStart = () => {
+    if (!bulkStart) return;
+    const d = { ...decisions };
+    for (const r of rows.filter((x) => x.needsStartMonth)) d[r.excelRowNumber] = { ...d[r.excelRowNumber], startMonth: bulkStart };
+    return refresh(d);
   };
 
   const setDecision = (row: number, patch: RowDecision) => refresh({ ...decisions, [row]: { ...decisions[row], ...patch } });
@@ -216,7 +260,7 @@ export function UploadPage() {
             }}
           >
             <div className="text-sm text-slate-600">은행에서 받은 거래내역 Excel(.xlsx) 파일을 끌어다 놓거나 선택하세요.</div>
-            <div className="text-xs text-slate-500">필수 컬럼: 거래일시 · 보낸분/받는분 · 출금액 · 입금액 (번호 선택)</div>
+            <div className="text-xs text-slate-500">필수 컬럼: 거래일시 · 보낸분/받는분 · 출금액 · 입금액 (번호 선택) · .xlsx / .xls 지원 · 출금은 기본으로 건너뜁니다</div>
             <input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => void onFile(e.target.files?.[0])} />
             <Button variant="primary" size="lg" onClick={() => inputRef.current?.click()} disabled={!!busy}>
               파일 선택
@@ -247,14 +291,34 @@ export function UploadPage() {
                 {file.filename} <span className="font-normal text-slate-500">· {file.sheet} 시트 · 헤더 {parse.headerRowNumber}행</span>
               </span>
             }
-            actions={<Button onClick={reset}>다른 파일 선택</Button>}
+            actions={
+              <>
+                {sheetOptions.length > 1 && (
+                  <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                    가져올 시트
+                    <select className={cx(inputBase, 'h-8 w-56')} value={file.sheet} disabled={!!busy} onChange={(e) => void switchSheet(e.target.value)}>
+                      {sheetOptions.map((o) => (
+                        <option key={o.name} value={o.name}>
+                          {o.name} (입금 {o.result.rows.filter((r) => r.depositAmount > 0).length}건 / 전체 {o.result.rows.length}건)
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="flex items-center gap-1.5 text-sm text-slate-700">
+                  <input type="checkbox" checked={skipWithdrawals} disabled={!!busy} onChange={(e) => void toggleSkip(e.target.checked)} />
+                  출금 건너뛰기 (입금만)
+                </label>
+                <Button onClick={reset}>다른 파일 선택</Button>
+              </>
+            }
           >
             {preview.alreadyImportedFile && (
               <div className="mb-3">
                 <Notice tone="amber">이미 업로드된 파일입니다 ({localDateTime(preview.alreadyImportedFile.imported_at)}). 모든 거래가 '이미 등록된 거래'로 표시되며 다시 저장되지 않습니다.</Notice>
               </div>
             )}
-            <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4 xl:grid-cols-8">
+            <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-5 xl:grid-cols-9">
               {[
                 ['전체 행', preview.summary.total],
                 ['입금', preview.summary.deposits],
@@ -264,13 +328,19 @@ export function UploadPage() {
                 ['확인필요', preview.summary.review],
                 ['미매칭', preview.summary.unmatched],
                 ['확정', preview.summary.selected],
+                ['입금 합계', won(rows.filter((r) => !r.duplicate).reduce((t, r) => t + r.depositAmount, 0))],
               ].map(([k, v]) => (
                 <div key={k} className="rounded-md bg-slate-50 px-3 py-2">
                   <div className="text-xs text-slate-500">{k}</div>
-                  <div className="text-lg font-semibold tabular-nums">{v}</div>
+                  <div className={cx("font-semibold tabular-nums", String(v).length > 8 ? "text-base" : "text-lg")}>{v}</div>
                 </div>
               ))}
             </div>
+            {skipWithdrawals && parse.rows.some((r) => r.depositAmount <= 0) && (
+              <p className="mt-3 text-xs text-slate-600">
+                출금 {parse.rows.filter((r) => r.depositAmount <= 0).length}건은 건너뜁니다 (확인·저장하지 않음). 입금 {parse.rows.filter((r) => r.depositAmount > 0).length}건만 거래처·금액을 확인합니다.
+              </p>
+            )}
             {parse.warnings.length > 0 && (
               <details className="mt-3 text-xs text-slate-600">
                 <summary className="cursor-pointer">파싱 참고사항 {parse.warnings.length}건</summary>
@@ -320,6 +390,15 @@ export function UploadPage() {
                   { value: 'withdrawal', label: `출금 ${count('withdrawal')}` },
                 ]}
               />
+              {rows.some((r) => r.needsStartMonth) && (
+                <span className="flex items-center gap-1.5 text-xs text-violet-800">
+                  월 배정 필요 {rows.filter((r) => r.needsStartMonth).length}건 · 첫 적용월 일괄 지정
+                  <input type="month" className={cx(inputBase, 'h-8 w-40')} value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} />
+                  <Button size="sm" disabled={!bulkStart || !!busy} onClick={() => void applyBulkStart()}>
+                    적용
+                  </Button>
+                </span>
+              )}
               {warningEligible.length > 0 && <span className="text-xs text-amber-700">경고 {warningEligible.length}건은 [전체 확정]에서 제외됩니다. 개별 확인 후 확정하세요.</span>}
             </div>
             <PreviewTable
@@ -366,7 +445,7 @@ export function UploadPage() {
             ].map(([k, v]) => (
               <div key={k} className="rounded-md bg-slate-50 px-3 py-2">
                 <div className="text-xs text-slate-500">{k}</div>
-                <div className="text-lg font-semibold tabular-nums">{v}</div>
+                <div className={cx("font-semibold tabular-nums", String(v).length > 8 ? "text-base" : "text-lg")}>{v}</div>
               </div>
             ))}
           </div>
@@ -464,11 +543,11 @@ function PreviewTable({
                   ) : (
                     <span className="text-slate-400">-</span>
                   )}
-                  {r.autoMatch.reason && r.matchStatus !== 'MANUAL_MATCHED' && r.autoMatch.matchType !== 'ALIAS' && !r.duplicate && (
+                  {r.autoMatch.reason && r.depositAmount > 0 && r.matchStatus !== 'MANUAL_MATCHED' && r.autoMatch.matchType !== 'ALIAS' && !r.duplicate && (
                     <div className={cx('mt-0.5 text-xs', r.matchStatus === 'AUTO_MATCHED' ? 'text-slate-500' : 'text-amber-700')}>{r.autoMatch.reason}</div>
                   )}
                 </td>
-                <td className="px-2 py-2 text-right align-top">{r.clientName || r.similarity ? <ScoreText score={r.similarity} /> : '-'}</td>
+                <td className="px-2 py-2 text-right align-top">{r.depositAmount > 0 && (r.clientName || r.similarity) ? <ScoreText score={r.similarity} /> : '-'}</td>
                 <td className="px-2 py-2 text-right align-top whitespace-nowrap tabular-nums">
                   {r.depositAmount > 0 && <div className="font-medium">{won(r.depositAmount)}</div>}
                   {r.withdrawalAmount > 0 && <div className="text-xs text-slate-500">출금 {won(r.withdrawalAmount)}</div>}
@@ -493,6 +572,7 @@ function PreviewTable({
                     <Badge tone={st.tone}>{st.label}</Badge>
                     {!r.duplicate && r.depositAmount > 0 && r.matchStatus !== 'UNMATCHED' && <MatchBadge status={r.matchStatus} />}
                     {r.feeWarning && !r.duplicate && <span className="text-xs text-amber-700">⚠ {r.feeWarning}</span>}
+                    {r.amountWarning && !r.duplicate && <span className="text-xs text-amber-700">⚠ {r.amountWarning}</span>}
                     {r.duplicateSuspect && !r.duplicate && <span className="text-xs text-amber-700">⚠ {r.duplicateSuspect}</span>}
                     {r.note && <span className="text-xs text-slate-500">비고: {r.note}</span>}
                   </div>

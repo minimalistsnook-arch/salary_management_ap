@@ -19,6 +19,8 @@ export interface SheetAlias {
 export interface ClientSheetResult {
   clients: SheetClient[];
   aliases: SheetAlias[];
+  /** A열 값 + B열 'x' : 거래처가 아닌 입금처 */
+  exclusions: { rawSender: string; sourceRow: number }[];
   warnings: string[];
 }
 
@@ -60,6 +62,7 @@ export function parseCsv(text: string): string[][] {
 export function interpretClientSheet(rows: string[][]): ClientSheetResult {
   const clients: SheetClient[] = [];
   const aliasRows: SheetAlias[] = [];
+  const exclusions: { rawSender: string; sourceRow: number }[] = [];
   const warnings: string[] = [];
   const seen = new Map<string, number>();
 
@@ -70,7 +73,8 @@ export function interpretClientSheet(rows: string[][]): ClientSheetResult {
     const cRaw = (r[2] ?? '').trim();
     if (!b) return;
     if (a) {
-      if (b.toLowerCase() !== 'x') aliasRows.push({ rawSender: a, clientName: b, sourceRow });
+      if (b.toLowerCase() === 'x') exclusions.push({ rawSender: a, sourceRow });
+      else aliasRows.push({ rawSender: a, clientName: b, sourceRow });
       return;
     }
     const amount = parseWon(cRaw);
@@ -91,5 +95,5 @@ export function interpretClientSheet(rows: string[][]): ClientSheetResult {
     warnings.push(`${al.sourceRow}행 별칭 '${al.rawSender}' → '${al.clientName}': 해당 거래처가 목록에 없어 제외했습니다.`);
     return false;
   });
-  return { clients, aliases, warnings };
+  return { clients, aliases, exclusions, warnings };
 }

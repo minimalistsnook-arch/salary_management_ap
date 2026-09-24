@@ -16,6 +16,7 @@ const MASTER: [string, string, string][] = [
   ['', '청진운수㈜', '165,000'],
   ['', '소도수사', '88,000'],
   ['송연탁 ', '소도수사', '88,000'],
+  ['경원여객', 'x', ''],
 ];
 
 const row = (n: number, dt: string, sender: string, deposit: number, withdrawal = 0): ParsedBankRow => ({
@@ -189,6 +190,22 @@ describe('개별건', () => {
 
     await assignTransaction(db, byName['광일상사'].id, { clientId: clientIds['광일운수㈜'] });
     expect((await individualCases(db)).map((r) => r.sender_raw)).not.toContain('광일상사');
+  });
+});
+
+describe('시트 x 제외', () => {
+  test('동기화 시 x 입금처 저장 → 업로드에서 미매칭, 개별건으로', async () => {
+    expect(count('SELECT COUNT(*) AS n FROM sender_exclusions')).toBe(1);
+    const req = { filename: 'f.xlsx', fileHash: '3'.repeat(64), rows: [row(2, '2026-08-31 11:34:00', '경원여객자동차(주)', 2200000)] };
+    const p = await buildPreview(db, req);
+    expect(p.rows[0]).toMatchObject({ matchStatus: 'UNMATCHED', clientId: null });
+    expect(p.rows[0].autoMatch.excluded).toBe(true);
+    await commitImport(db, req);
+    const [ind] = await individualCases(db);
+    expect(ind).toMatchObject({ sender_raw: '경원여객자동차(주)', excluded: true, similar: false });
+    // 재동기화해도 중복 생성 없음
+    await syncClients(db, sheet(MASTER));
+    expect(count('SELECT COUNT(*) AS n FROM sender_exclusions')).toBe(1);
   });
 });
 

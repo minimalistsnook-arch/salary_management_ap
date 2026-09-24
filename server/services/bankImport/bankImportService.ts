@@ -1,7 +1,7 @@
 import { applyToLedger, buildLedger, type Ledger } from '../../../src/domain/allocation';
 import type { ParsedBankRow } from '../../../src/domain/bankExcelParser';
 import type { ImportCommitResponse, ImportPreviewRequest, ImportPreviewResponse, PreviewRow, RowDecision, RowKind } from '../../../src/domain/dto';
-import { feeWarning } from '../../../src/domain/feeCheck';
+import { feeWarning, largeDepositWarning } from '../../../src/domain/feeCheck';
 import { contentKey, transactionFingerprint } from '../../../src/domain/fingerprint';
 import { similarity } from '../../../src/domain/matching';
 import { isYearMonth } from '../../../src/domain/month';
@@ -127,6 +127,7 @@ export async function buildPreview(db: SqlDb, req: ImportPreviewRequest): Promis
       unallocated: r.depositAmount,
       allocationError: null,
       feeWarning: client && r.depositAmount > 0 ? feeWarning(r.depositAmount, client.current_contract_amount) : null,
+      amountWarning: client && r.depositAmount > 0 ? largeDepositWarning(r.depositAmount, client.current_contract_amount) : null,
       selected: false,
       selectable: false,
       blockReason: null,
