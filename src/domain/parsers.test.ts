@@ -119,6 +119,28 @@ describe('기존 노무자문비 시트 가져오기', () => {
     ]);
   });
 
+  test('기존 [ 매 출 ]-회원사 양식: 계약기간·계약형태·입금예상일·담당, 중복 연도 라벨', () => {
+    const months = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => `${from + i}월`);
+    const rows: unknown[][] = [
+      ['[ 매 출 ]-회원사'],
+      ['연번', '계약기간', null, null, '회     원     사', '계약금액', '계약형태', '입금예상일', '2017년', ...Array(11).fill(null), '2018년', ...Array(11).fill(null), '2018년', ...Array(11).fill(null), '담당'],
+      [null, null, null, null, null, null, null, null, ...months(1, 12), ...months(1, 12), ...months(1, 12), null],
+      [4, '2006-07-15', '~', '2007-07-14', '청담웨딩프라자', '220,000', '통장입금', '20', ...Array(11).fill(null), '1/29', '2/26', ...Array(10).fill(null), '1/8', '12/28', ...Array(11).fill(null), '재원'],
+    ];
+    const r = parseLegacyAdvisorySheet(rows);
+    expect(r.errors).toEqual([]);
+    const c = r.clients[0];
+    expect(c.name).toBe('청담웨딩프라자');
+    expect(c.contractAmount).toBe(220000);
+    expect(c.meta).toEqual({ seq: '4', contractStart: '2006-07-15', contractEnd: '2007-07-14', contractType: '통장입금', expectedPayDay: '20', manager: '재원' });
+    expect(c.payments.map((p) => [p.serviceMonth, p.paymentDates[0]])).toEqual([
+      ['2017-12', '2018-01-29'],
+      ['2018-01', '2018-02-26'],
+      ['2018-12', '2019-01-08'], // 중복 라벨 블록의 2018-01(12/28)은 이미 값이 있어 먼저 나온 값 우선
+    ]);
+    expect(r.warnings.some((w) => w.includes('두 번'))).toBe(true);
+  });
+
   test('입금일 연도 추정: 선납은 3개월 전까지, 연체는 9개월 후까지', () => {
     expect(inferPaymentDate('2026-01', 12, 28)).toBe('2025-12-28');
     expect(inferPaymentDate('2026-05', 9, 24)).toBe('2026-09-24');

@@ -13,11 +13,22 @@ export interface LegacyPayment {
   rawCell: string;
 }
 
+/** 노무자문비 시트의 거래처 부가 정보 (계약기간·계약형태·입금예상일·담당) */
+export interface LegacyClientMeta {
+  seq: string | null;
+  contractStart: string | null;
+  contractEnd: string | null;
+  contractType: string | null;
+  expectedPayDay: string | null;
+  manager: string | null;
+}
+
 export interface LegacyClientRow {
   excelRowNumber: number;
   name: string;
   contractAmount: number | null;
   payments: LegacyPayment[];
+  meta?: LegacyClientMeta;
 }
 
 export interface LegacyParseResult {
@@ -32,8 +43,11 @@ const t = (v: unknown) => cellText(v).normalize('NFKC').trim();
 const MONTH_ONLY_RE = /^(\d{1,2})\s*월(분)?$/;
 const YEAR_MONTH_RE = /^(\d{2}|\d{4})\s*[년.\-/]\s*(\d{1,2})\s*월?(분)?$/;
 const YEAR_RE = /^(20\d{2})\s*년?(도)?$/;
-const NAME_HEADER_RE = /거래처|회원사|업체|상호|회사명|사업장/;
-const CONTRACT_HEADER_RE = /계약|자문료|월\s*금액|금액/;
+// 헤더 비교는 공백을 모두 제거한 값으로 한다 ('회     원     사' → '회원사')
+const hn = (v: unknown) => t(v).replace(/\s+/g, '');
+const NAME_HEADERS = new Set(['회원사', '거래처', '거래처명', '업체', '업체명', '상호', '회사명', '사업장']);
+const isNameHeader = (v: unknown) => NAME_HEADERS.has(hn(v));
+const isContractHeader = (v: unknown) => /^(계약금액|월계약금액|자문료|월금액|금액)$/.test(hn(v));
 const EMPTY_CELL_RE = /^(-|미납|x|X|없음)?$/;
 
 /**
@@ -101,14 +115,14 @@ export function parseLegacyAdvisorySheet(rows: unknown[][], firstRowNumber = 1, 
   }
   const header = rows[headerIdx] ?? [];
 
-  // 2) 연도: 위쪽 행(병합셀)에서 찾아 오른쪽으로 전파
-  const yearAbove: (number | null)[] = header.map(() => null);
+  // 2) 연도: 위쪽 행(병합셀)에서 찾아 오른쪽으로 전파. labelCol = 그 연도 라벨이 있는 열
+  const yearAbove: ({ year: number; labelCol: number } | null)[] = header.map(() => null);
   for (let up = 1; up <= 3 && headerIdx - up >= 0; up++) {
     const r = rows[headerIdx - up] ?? [];
-    let cur: number | null = null;
+    let cur: { year: number; labelCol: number } | null = null;
     for (let c = 0; c < Math.max(r.length, header.length); c++) {
       const m = YEAR_RE.exec(t(r[c]));
-      if (m) cur = Number(m[1]);
+      if (m) cur = { year: Number(m[1]), labelCol: c };
       if (cur !== null && yearAbove[c] === null) yearAbove[c] = cur;
     }
     if (yearAbove.some((y) => y !== null)) break;
@@ -130,12 +144,12 @@ export function parseLegacyAdvisorySheet(rows: unknown[][], firstRowNumber = 1, 
     if (!mo) continue;
     const m = Number(mo[1]);
     if (m < 1 || m > 12) continue;
-    let y = yearAbove[c];
-    if (y !== null) {
-      // 같은 연도 라벨 아래에서 월이 줄어들면(12월 → 1월) 다음 연도
+    const label = yearAbove[c];
+    let y: number | null = label?.year ?? null;
+    if (label) {
+      // 같은 연도 라벨 범위 안에서 월이 줄어들면(12월 → 1월) 다음 연도. 새 라벨이 시작되면 라벨 연도를 그대로 사용
       const prev = monthCols[monthCols.length - 1];
-      if (prev && yearAbove[prev.col] === y && m <= prevMonth) y = Number(prev.month.slice(0, 4)) + 1;
-      else if (prev && Number(prev.month.slice(0, 4)) > y) y = Number(prev.month.slice(0, 4)) + (m <= prevMonth ? 1 : 0);
+      if (prev && yearAbove[prev.col]?.labelCol === label.labelCol && m <= prevMonth) y = Number(prev.month.slice(0, 4)) + 1;
     } else {
       if (seqYear === null) {
         errors.push(`${cell} 열(Excel ${firstRowNumber + headerIdx}행)의 연도를 알 수 없습니다. 시작 연도를 지정해주세요.`);
@@ -145,18 +159,30 @@ export function parseLegacyAdvisorySheet(rows: unknown[][], firstRowNumber = 1, 
       y = seqYear;
     }
     prevMonth = m;
-    monthCols.push({ col: c, month: toYearMonth(y, m) });
+    monthCols.push({ col: c, month: toYearMonth(y as number, m) });
+  }
+  const seenMonth = new Map<YearMonth, number>();
+  for (const mc of monthCols) {
+    if (seenMonth.has(mc.month)) warnings.push(`${mc.month} 열이 두 번 있습니다 (연도 라벨 중복 가능). 먼저 나온 열의 값을 우선합니다.`);
+    else seenMonth.set(mc.month, mc.col);
   }
 
   // 3) 거래처명 / 계약금액 열
   const firstMonthCol = Math.min(...monthCols.map((m) => m.col));
   const headerZone = rows.slice(Math.max(0, headerIdx - 3), headerIdx + 1);
-  const findCol = (re: RegExp) => {
-    for (let c = 0; c < firstMonthCol; c++) if (headerZone.some((r) => re.test(t((r ?? [])[c])))) return c;
+  const findCol = (test: (v: unknown) => boolean, from = 0, to = firstMonthCol) => {
+    for (let c = from; c < to; c++) if (headerZone.some((r) => test((r ?? [])[c]))) return c;
     return -1;
   };
-  let nameCol = findCol(NAME_HEADER_RE);
-  const contractCol = findCol(CONTRACT_HEADER_RE);
+  let nameCol = findCol(isNameHeader);
+  const contractCol = findCol(isContractHeader);
+  const maxCol = Math.max(...rows.slice(Math.max(0, headerIdx - 3), headerIdx + 1).map((r) => (r ?? []).length));
+  const lastMonthCol = Math.max(...monthCols.map((m) => m.col));
+  const seqCol = findCol((v) => /^(연번|번호|no\.?)$/i.test(hn(v)));
+  const periodCol = findCol((v) => hn(v) === '계약기간');
+  const typeCol = findCol((v) => hn(v) === '계약형태');
+  const payDayCol = findCol((v) => /^입금(예상|예정)일$/.test(hn(v)));
+  const managerCol = findCol((v) => hn(v) === '담당', lastMonthCol + 1, maxCol + 1);
   if (nameCol < 0) {
     // 헤더명이 없으면 월 열 왼쪽에서 문자가 가장 많은 열
     let best = -1;
@@ -191,13 +217,35 @@ export function parseLegacyAdvisorySheet(rows: unknown[][], firstRowNumber = 1, 
       if (a.ok && a.value > 0) contractAmount = a.value;
       else if (!a.ok) warnings.push(`Excel ${excelRow}행 '${name}': 계약금액 '${cellText(r[contractCol])}'을 읽을 수 없습니다.`);
     }
+    const text = (col: number) => (col < 0 ? null : t(r[col]) || null);
+    let contractStart: string | null = null;
+    let contractEnd: string | null = null;
+    if (periodCol >= 0) {
+      const end = nameCol > periodCol ? nameCol : periodCol + 3;
+      const vals = r.slice(periodCol, end).map((v) => (typeof v === 'number' ? (excelSerialToDateTime(v)?.slice(0, 10) ?? null) : t(v))).filter((v): v is string => !!v && v !== '~');
+      contractStart = vals[0] ?? null;
+      contractEnd = vals.length > 1 ? vals[vals.length - 1] : null;
+    }
+    const meta: LegacyClientMeta = {
+      seq: text(seqCol),
+      contractStart,
+      contractEnd,
+      contractType: text(typeCol),
+      expectedPayDay: text(payDayCol),
+      manager: text(managerCol),
+    };
     const payments: LegacyPayment[] = [];
+    const usedMonths = new Set<YearMonth>();
     for (const mc of monthCols) {
+      if (usedMonths.has(mc.month)) continue;
       const { dates, problem } = parsePaymentCell(r[mc.col], mc.month);
       if (problem) warnings.push(`Excel ${excelRow}행 '${name}' ${mc.month}: ${problem} — 가져오지 않습니다.`);
-      if (dates.length) payments.push({ serviceMonth: mc.month, paymentDates: dates, rawCell: cellText(r[mc.col]) });
+      if (dates.length) {
+        usedMonths.add(mc.month);
+        payments.push({ serviceMonth: mc.month, paymentDates: dates, rawCell: cellText(r[mc.col]) });
+      }
     }
-    clients.push({ excelRowNumber: excelRow, name, contractAmount, payments });
+    clients.push({ excelRowNumber: excelRow, name, contractAmount, payments, meta });
   }
   if (!clients.length) errors.push('거래처 데이터 행을 찾을 수 없습니다.');
   return { clients, errors, warnings };

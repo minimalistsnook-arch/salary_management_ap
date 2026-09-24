@@ -93,6 +93,23 @@ export async function commitLegacy(db: SqlDb, req: LegacyPreviewRequest): Promis
       if (!cur || p.serviceMonth < cur) startMonths.set(r.clientId, p.serviceMonth);
     }
   }
+  // 계약기간·계약형태·입금예상일·담당 (값이 있는 항목만 갱신)
+  let metaUpdated = 0;
+  for (const r of rows) {
+    if (r.clientId == null || !r.meta) continue;
+    const m = r.meta;
+    if (![m.contractStart, m.contractEnd, m.contractType, m.expectedPayDay, m.manager, m.seq].some(Boolean)) continue;
+    metaUpdated++;
+    stmts.push(
+      db
+        .prepare(
+          `UPDATE clients SET contract_start = COALESCE(?, contract_start), contract_end = COALESCE(?, contract_end), contract_type = COALESCE(?, contract_type),
+             expected_pay_day = COALESCE(?, expected_pay_day), manager = COALESCE(?, manager), legacy_seq = COALESCE(?, legacy_seq), updated_at = ? WHERE id = ?`,
+        )
+        .bind(m.contractStart, m.contractEnd, m.contractType, m.expectedPayDay, m.manager, m.seq, now, r.clientId),
+    );
+  }
+
   for (const [clientId, month] of startMonths) {
     const c = clients.get(clientId);
     if (c && !c.management_start_month) {
@@ -100,7 +117,7 @@ export async function commitLegacy(db: SqlDb, req: LegacyPreviewRequest): Promis
       stmts.push(auditStmt(db, 'SET_START_MONTH', 'client', clientId, { management_start_month: null }, { management_start_month: month, reason: 'LEGACY_IMPORT' }));
     }
   }
-  stmts.push(auditStmt(db, 'IMPORT_LEGACY_ADVISORY', 'payment_allocations', null, null, { clients: touched.size, allocations, skippedMonths }));
+  stmts.push(auditStmt(db, 'IMPORT_LEGACY_ADVISORY', 'payment_allocations', null, null, { clients: touched.size, allocations, skippedMonths, metaUpdated }));
   await db.batch(stmts);
   return { clients: touched.size, allocations, skippedMonths };
 }

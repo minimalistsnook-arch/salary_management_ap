@@ -15,6 +15,13 @@ export interface Client {
   active: number;
   created_at: string;
   updated_at: string;
+  /** 노무자문비 양식용 부가 정보 (없을 수 있음) */
+  contract_start?: string | null;
+  contract_end?: string | null;
+  contract_type?: string | null;
+  expected_pay_day?: string | null;
+  manager?: string | null;
+  legacy_seq?: string | null;
 }
 
 export interface ClientAlias {
