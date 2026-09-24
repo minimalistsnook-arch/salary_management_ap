@@ -12,5 +12,5 @@ CLIENT_SOURCE_MODE = "csv"
 [[d1_databases]]
 binding = "DB"
 database_name = "labor-advisory-ledger"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "c333f219-6356-4b97-af6e-e91f555efff2"
 migrations_dir = "migrations"
