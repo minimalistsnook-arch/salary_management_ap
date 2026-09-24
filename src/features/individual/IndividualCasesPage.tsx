@@ -7,7 +7,7 @@ import { Badge, Button, Card, cx, EmptyState, ErrorBox, inputBase, Notice, Segme
 import { BulkActionBar } from '../transactions/BulkActionBar';
 import { TransactionDrawer } from '../transactions/TransactionDrawer';
 
-type SimFilter = 'all' | 'similar' | 'none';
+type SimFilter = 'all' | 'similar' | 'none' | 'marked' | 'open';
 
 /**
  * 3. 개별건 입금: 통장 Excel 에서 거래처에 매칭되지 않은 입금을 모두 모아 보여준다.
@@ -33,8 +33,10 @@ export function IndividualCasesPage() {
   const rows = useMemo(() => {
     const nq = normalizeName(q);
     return (data ?? []).filter((r) => {
-      if (sim === 'similar' && !r.similar) return false;
-      if (sim === 'none' && r.similar) return false;
+      if (sim === 'similar' && (!r.similar || r.category === 'INDIVIDUAL')) return false;
+      if (sim === 'none' && (r.similar || r.category === 'INDIVIDUAL')) return false;
+      if (sim === 'marked' && r.category !== 'INDIVIDUAL') return false;
+      if (sim === 'open' && r.category === 'INDIVIDUAL') return false;
       if (q.trim()) {
         const hay = [r.sender_raw, r.bestCandidate?.clientName ?? '', r.note ?? ''];
         if (!hay.some((h) => h.includes(q.trim()) || (nq && normalizeName(h).includes(nq)))) return false;
@@ -91,6 +93,8 @@ export function IndividualCasesPage() {
               onChange={setSim}
               options={[
                 { value: 'all', label: '전체' },
+                { value: 'open', label: '미분류' },
+                { value: 'marked', label: `개별건 확정 ${(data ?? []).filter((r) => r.category === 'INDIVIDUAL').length}` },
                 { value: 'similar', label: `유사 ${INDIVIDUAL_SIMILAR_THRESHOLD}% 이상` },
                 { value: 'none', label: `${INDIVIDUAL_SIMILAR_THRESHOLD}% 미만` },
               ]}
@@ -158,7 +162,15 @@ export function IndividualCasesPage() {
                     <td className={cx('px-2 py-2 text-right tabular-nums', r.similar ? 'font-medium text-amber-800' : 'text-slate-400')}>
                       {r.bestCandidate && !r.isGeneric && !r.excluded ? `${r.bestCandidate.score}%` : '-'}
                     </td>
-                    <td className="px-2 py-2">{r.match_status === 'REVIEW_REQUIRED' ? <Badge tone="amber">확인필요</Badge> : <Badge tone="red">미매칭</Badge>}</td>
+                    <td className="px-2 py-2">
+                      {r.category === 'INDIVIDUAL' ? (
+                        <Badge tone="violet">개별건 확정</Badge>
+                      ) : r.match_status === 'REVIEW_REQUIRED' ? (
+                        <Badge tone="amber">확인필요</Badge>
+                      ) : (
+                        <Badge tone="red">미매칭</Badge>
+                      )}
+                    </td>
                     <td className="max-w-40 truncate px-2 py-2 text-xs text-slate-600" title={r.note ?? ''}>
                       {r.note}
                     </td>

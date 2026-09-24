@@ -24,7 +24,7 @@ export async function transactionDetail(db: SqlDb, id: number): Promise<Transact
  * 거래처가 지정되면 자동으로 목록에서 빠진다. 유사 거래처는 현재 거래처/별칭 기준으로 다시 계산한다.
  */
 export async function individualCases(db: SqlDb, year?: number): Promise<IndividualCaseRow[]> {
-  const where = "t.deposit_amount > 0 AND COALESCE(m.status, 'UNMATCHED') IN ('UNMATCHED', 'REVIEW_REQUIRED')";
+  const where = "t.deposit_amount > 0 AND COALESCE(m.status, 'UNMATCHED') IN ('UNMATCHED', 'REVIEW_REQUIRED') AND COALESCE(m.category, '') <> 'DUPLICATE'";
   const rows = year ? await queryTransactions(db, `${where} AND substr(t.transaction_datetime, 1, 4) = ?`, [String(year)]) : await queryTransactions(db, where);
   if (!rows.length) return [];
   const index = await loadMatchIndex(db);
@@ -59,13 +59,14 @@ export async function dashboard(db: SqlDb): Promise<DashboardResponse> {
   const currentMonth = currentYearMonth();
   const sums = await first<{ dep: number | null; wd: number | null }>(
     db,
-    'SELECT SUM(deposit_amount) AS dep, SUM(withdrawal_amount) AS wd FROM bank_transactions WHERE substr(transaction_datetime, 1, 7) = ?',
+    `SELECT SUM(t.deposit_amount) AS dep, SUM(t.withdrawal_amount) AS wd FROM bank_transactions t LEFT JOIN transaction_client_matches m ON m.transaction_id = t.id
+     WHERE substr(t.transaction_datetime, 1, 7) = ? AND COALESCE(m.category, '') <> 'DUPLICATE'`,
     currentMonth,
   );
   const unmatched = await first<{ n: number }>(
     db,
     `SELECT COUNT(*) AS n FROM bank_transactions t LEFT JOIN transaction_client_matches m ON m.transaction_id = t.id
-     WHERE t.deposit_amount > 0 AND COALESCE(m.status, 'UNMATCHED') IN ('UNMATCHED', 'REVIEW_REQUIRED')`,
+     WHERE t.deposit_amount > 0 AND COALESCE(m.status, 'UNMATCHED') IN ('UNMATCHED', 'REVIEW_REQUIRED') AND COALESCE(m.category, '') <> 'DUPLICATE'`,
   );
   const clients = await listClients(db, true);
   const allocs = await allocationsForClients(db, clients.map((c) => c.id));

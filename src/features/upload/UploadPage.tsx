@@ -41,7 +41,7 @@ function Stepper({ step }: { step: number }) {
 type Filter = 'all' | 'confirmed' | 'waiting' | 'review' | 'unmatched' | 'warning' | 'duplicate' | 'withdrawal';
 
 function rowState(r: PreviewRow): { label: string; tone: 'green' | 'amber' | 'red' | 'slate' | 'blue' | 'violet' } {
-  if (r.duplicate) return { label: '이미 등록된 거래', tone: 'slate' };
+  if (r.duplicate) return { label: r.duplicateSuspect ? '중복 건너뜀' : '이미 등록된 거래', tone: 'slate' };
   if (r.depositAmount <= 0) return { label: '출금', tone: 'slate' };
   if (r.selected) return { label: '확정', tone: 'green' };
   if (r.needsStartMonth) return { label: '월 배정 필요', tone: 'violet' };

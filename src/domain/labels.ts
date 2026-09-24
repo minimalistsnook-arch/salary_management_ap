@@ -3,8 +3,11 @@ import type { MatchStatus, MatchType, PaymentStatus } from './types';
 import type { TransactionRow } from './dto';
 
 /** 거래처로 확정되지 않은 입금 → '3. 개별건' 에서 관리 (1번 메뉴에는 표시하지 않음) */
-export const isIndividualCase = (t: Pick<TransactionRow, 'deposit_amount' | 'match_status'>) =>
-  t.deposit_amount > 0 && (t.match_status === 'UNMATCHED' || t.match_status === 'REVIEW_REQUIRED');
+export const isIndividualCase = (t: Pick<TransactionRow, 'deposit_amount' | 'match_status' | 'category'>) =>
+  t.deposit_amount > 0 && t.category !== 'DUPLICATE' && (t.match_status === 'UNMATCHED' || t.match_status === 'REVIEW_REQUIRED');
+
+/** 통장 중복 행 (건너뜀) — 어느 메뉴에도 표시하지 않음 */
+export const isSkippedDuplicate = (t: Pick<TransactionRow, 'category'>) => t.category === 'DUPLICATE';
 
 export const MATCH_STATUS_LABEL: Record<MatchStatus, string> = {
   AUTO_MATCHED: '자동매칭',

@@ -108,11 +108,14 @@ export interface TransactionRow {
   match_type: MatchType;
   match_status: MatchStatus;
   note: string | null;
+  /** INDIVIDUAL: 개별건으로 확정, DUPLICATE: 통장 중복 행(건너뜀) */
+  category: 'INDIVIDUAL' | 'DUPLICATE' | null;
   allocations: TxAllocation[];
 }
 
 export interface BulkActionRequest {
-  action: 'confirm' | 'redate' | 'unassign';
+  /** individual: 거래처가 아닌 개별건으로 확정 */
+  action: 'confirm' | 'redate' | 'unassign' | 'individual';
   ids: number[];
   /** 지정 거래처 (없으면 각 거래의 추천 거래처) */
   clientId?: number | null;

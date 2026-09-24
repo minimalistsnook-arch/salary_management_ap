@@ -57,7 +57,7 @@ export async function queryTransactions(db: SqlDb, where = '1 = 1', params: unkn
             COALESCE(m.similarity_score, 0) AS similarity_score,
             COALESCE(m.match_type, 'NONE') AS match_type,
             COALESCE(m.status, 'UNMATCHED') AS match_status,
-            m.note
+            m.note, m.category
      FROM bank_transactions t
      JOIN bank_import_batches b ON b.id = t.import_batch_id
      LEFT JOIN transaction_client_matches m ON m.transaction_id = t.id

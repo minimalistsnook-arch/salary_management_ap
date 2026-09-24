@@ -42,7 +42,7 @@ const inYear = (date: string, year: number | null) => year === null || date.star
 export function buildIncomeRows(transactions: TransactionRow[], year: number | null): IncomeRow[] {
   const rows: IncomeRow[] = [];
   const txs = transactions
-    .filter((t) => t.deposit_amount > 0 && inYear(t.transaction_datetime, year))
+    .filter((t) => t.deposit_amount > 0 && t.category !== 'DUPLICATE' && inYear(t.transaction_datetime, year))
     .sort((a, b) => a.transaction_datetime.localeCompare(b.transaction_datetime) || a.id - b.id);
   for (const t of txs) {
     const date = t.transaction_datetime.slice(0, 10);

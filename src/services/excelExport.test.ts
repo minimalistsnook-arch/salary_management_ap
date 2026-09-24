@@ -36,6 +36,7 @@ const tx = (id: number, dt: string, sender: string, deposit: number, clientName:
   match_type: 'FUZZY',
   match_status: clientName ? 'MANUAL_MATCHED' : 'UNMATCHED',
   note: null,
+  category: null,
   allocations: allocs.map(([m, a], i) => ({ id: id * 10 + i, service_month: m, payment_date: dt.slice(0, 10), allocated_amount: a, contract_amount_snapshot: 220000, status: 'PAID', source: 'BANK', month_status: 'PAID' })),
 });
 

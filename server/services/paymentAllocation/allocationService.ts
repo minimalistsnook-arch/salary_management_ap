@@ -78,16 +78,24 @@ async function loadTx(db: SqlDb, txId: number) {
   return { tx, match, allocations };
 }
 
-export function upsertMatchStmt(db: SqlDb, txId: number, m: { clientId: number | null; score: number; matchType: string; status: string; note: string | null }) {
+/**
+ * 매칭 저장. category: undefined = 기존 분류 유지(비고 수정 등), null = 분류 해제(거래처 지정·취소), 값 = 해당 분류로
+ */
+export function upsertMatchStmt(
+  db: SqlDb,
+  txId: number,
+  m: { clientId: number | null; score: number; matchType: string; status: string; note: string | null; category?: 'INDIVIDUAL' | 'DUPLICATE' | null },
+) {
   const now = nowIso();
+  const setCategory = m.category !== undefined;
   return db
     .prepare(
-      `INSERT INTO transaction_client_matches (transaction_id, client_id, similarity_score, match_type, status, note, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO transaction_client_matches (transaction_id, client_id, similarity_score, match_type, status, note, category, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(transaction_id) DO UPDATE SET client_id = excluded.client_id, similarity_score = excluded.similarity_score,
-         match_type = excluded.match_type, status = excluded.status, note = excluded.note, updated_at = excluded.updated_at`,
+         match_type = excluded.match_type, status = excluded.status, note = excluded.note, updated_at = excluded.updated_at${setCategory ? ', category = excluded.category' : ''}`,
     )
-    .bind(txId, m.clientId, m.score, m.matchType, m.status, m.note, now, now);
+    .bind(txId, m.clientId, m.score, m.matchType, m.status, m.note, m.category ?? null, now, now);
 }
 
 /** 거래처 지정/변경 (+ 첫 적용월 지정). 기존 배정은 지우고 가장 오래된 미납월부터 다시 배정 */
@@ -109,7 +117,7 @@ export async function assignTransaction(db: SqlDb, txId: number, input: { client
   const after = { client_id: client.id, client_name: client.name, status: 'MANUAL_MATCHED', start_month: input.startMonth ?? null, note, allocations: lines };
   const stmts: SqlStatement[] = [
     db.prepare('DELETE FROM payment_allocations WHERE transaction_id = ?').bind(txId),
-    upsertMatchStmt(db, txId, { clientId: client.id, score: similarity(tx.sender_raw, client.name), matchType: 'MANUAL', status: 'MANUAL_MATCHED', note }),
+    upsertMatchStmt(db, txId, { clientId: client.id, score: similarity(tx.sender_raw, client.name), matchType: 'MANUAL', status: 'MANUAL_MATCHED', note, category: null }),
     ...insertAllocationStmts(db, { idSql: '?', idParams: [txId] }, client.id, tx.transaction_datetime.slice(0, 10), lines, 'BANK'),
     auditStmt(db, 'ASSIGN_CLIENT', 'transaction', txId, { match, allocations }, after),
   ];
@@ -174,7 +182,7 @@ export async function unassignTransaction(db: SqlDb, txId: number) {
   const { match, allocations } = await loadTx(db, txId);
   await db.batch([
     db.prepare('DELETE FROM payment_allocations WHERE transaction_id = ?').bind(txId),
-    upsertMatchStmt(db, txId, { clientId: null, score: 0, matchType: 'NONE', status: 'REVIEW_REQUIRED', note: match?.note ?? null }),
+    upsertMatchStmt(db, txId, { clientId: null, score: 0, matchType: 'NONE', status: 'REVIEW_REQUIRED', note: match?.note ?? null, category: null }),
     auditStmt(db, 'UNASSIGN_CLIENT', 'transaction', txId, { match, allocations }, { status: 'REVIEW_REQUIRED' }),
   ]);
 }

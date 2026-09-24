@@ -47,7 +47,7 @@ async function buildPlans(db: SqlDb, text: string, reference: string) {
   const byNorm = new Map<string, Client>();
   for (const c of clients) if (!byNorm.has(normalizeName(c.name)) || c.active) byNorm.set(normalizeName(c.name), c);
   const index = await loadMatchIndex(db);
-  const txs = (await queryTransactions(db, 't.deposit_amount > 0')).filter((t) => t.client_id != null && t.match_status !== 'UNMATCHED');
+  const txs = (await queryTransactions(db, 't.deposit_amount > 0')).filter((t) => t.client_id != null && t.match_status !== 'UNMATCHED' && t.category == null);
 
   const plans: Plan[] = parsed.rows.map((row) => {
     let client = byNorm.get(normalizeName(row.name)) ?? null;
@@ -199,7 +199,7 @@ export async function applyBaseline(db: SqlDb, input: { text: string; reference?
       });
       stmts.push(
         db.prepare('DELETE FROM payment_allocations WHERE transaction_id = ?').bind(d.id),
-        upsertMatchStmt(db, d.id, { clientId: c.id, score: similarity(d.sender, c.name), matchType: 'MANUAL', status: 'MANUAL_MATCHED', note: null }),
+        upsertMatchStmt(db, d.id, { clientId: c.id, score: similarity(d.sender, c.name), matchType: 'MANUAL', status: 'MANUAL_MATCHED', note: null, category: null }),
         ...insertAllocationStmts(db, { idSql: '?', idParams: [d.id] }, c.id, d.date, lines, 'BANK'),
         auditStmt(db, 'BASELINE_ALIGN', 'transaction', d.id, { allocations: d.before }, { client_id: c.id, allocations: lines }),
       );

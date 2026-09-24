@@ -8,7 +8,7 @@ import { createClientSourceAdapter, type ClientSourceEnv } from './services/clie
 import { getSyncStatus, syncClients } from './services/clientSync/clientSyncService';
 import { commitLegacy, previewLegacy } from './services/legacyImport/legacyImportService';
 import { applyBaseline, previewBaseline } from './services/baseline/baselineService';
-import { bulkTransactions } from './services/paymentAllocation/bulkService';
+import { bulkTransactions, markDuplicateTransactions } from './services/paymentAllocation/bulkService';
 import { assignTransaction, setManualAllocations, unassignTransaction, updateNote } from './services/paymentAllocation/allocationService';
 import { advisoryData, dashboard, exportData, individualCases, listBatches, listTransactions, transactionDetail } from './services/query/queryService';
 
@@ -73,6 +73,7 @@ const routes: [string, RegExp, Handler][] = [
   ['GET', /^\/api\/imports$/, ({ db }) => listBatches(db)],
   // 거래
   ['GET', /^\/api\/transactions$/, ({ db, url }) => listTransactions(db, url.searchParams.get('year') ? yearParam(url) : undefined)],
+  ['POST', /^\/api\/maintenance\/skip-duplicates$/, ({ db }) => markDuplicateTransactions(db)],
   ['POST', /^\/api\/transactions\/bulk$/, async ({ db, body }) => bulkTransactions(db, await body())],
   ['GET', /^\/api\/transactions\/(\d+)$/, ({ db, params }) => transactionDetail(db, int(params[0]))],
   ['POST', /^\/api\/transactions\/(\d+)\/assign$/, async ({ db, params, body }) => {

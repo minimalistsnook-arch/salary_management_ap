@@ -6,7 +6,7 @@ import { buildPreview, commitImport } from './bankImport/bankImportService';
 import type { ClientSourceAdapter } from './clientSync/adapters';
 import { syncClients } from './clientSync/clientSyncService';
 import { assignTransaction, setManualAllocations } from './paymentAllocation/allocationService';
-import { bulkTransactions } from './paymentAllocation/bulkService';
+import { bulkTransactions, markDuplicateTransactions } from './paymentAllocation/bulkService';
 import { applyBaseline, previewBaseline } from './baseline/baselineService';
 import { dashboard, individualCases, listTransactions } from './query/queryService';
 
@@ -295,6 +295,66 @@ describe('마지막 입금 기준표', () => {
       ['광일운수㈜', false, ['2026-09']],
       ['청진운수㈜', false, ['2026-08']],
     ]);
+  });
+});
+
+describe('통장 중복 행 건너뛰기', () => {
+  test('같은 날짜·시각·입금자·금액이 겹치면 첫 건만 저장 (파일 안 / 이미 저장된 거래)', async () => {
+    const rows = [row(2, '2026-08-31 12:17:19', '(주)승일', 605000), row(3, '2026-08-31 12:17:19', '(주)승일', 605000), row(4, '2026-08-31 12:17:20', '(주)승일', 605000)];
+    const p = await buildPreview(db, { filename: 'd.xlsx', fileHash: 'd1'.padEnd(64, '0'), rows });
+    expect(p.rows.map((r) => r.duplicate)).toEqual([false, true, false]);
+    expect(p.rows[1].duplicateSuspect).toMatch(/중복 건너뜀.*2행/);
+    const c = await commitImport(db, { filename: 'd.xlsx', fileHash: 'd1'.padEnd(64, '0'), rows });
+    expect(c).toMatchObject({ inserted: 2, duplicates: 1 });
+
+    // 다른 파일(행번호가 달라도)에 같은 거래가 있으면 건너뜀
+    const other = await commitImport(db, { filename: 'e.xlsx', fileHash: 'e1'.padEnd(64, '0'), rows: [row(9, '2026-08-31 12:17:19', '(주)승일', 605000)] });
+    expect(other).toMatchObject({ inserted: 0, duplicates: 1 });
+    expect(count('SELECT COUNT(*) AS n FROM bank_transactions')).toBe(2);
+  });
+
+  test('이미 저장된 중복 행: 첫 건만 남기고 중복 표시 + 배정 제거, 목록에서 제외', async () => {
+    await commitImport(db, {
+      filename: 'f.xlsx',
+      fileHash: 'f1'.padEnd(64, '0'),
+      rows: [row(2, '2026-08-19 10:29:58', '광일운수(주)', 275000)],
+      decisions: { 2: { selected: true } },
+    });
+    // 예전 방식으로 이미 들어가 있던 중복 행 재현
+    const batch = (db.raw.prepare('SELECT id FROM bank_import_batches').get() as { id: number }).id;
+    db.raw
+      .prepare("INSERT INTO bank_transactions (import_batch_id, excel_row_number, transaction_datetime, sender_raw, withdrawal_amount, deposit_amount, transaction_hash, created_at) VALUES (?, 3, '2026-08-19 10:29:58', '광일운수(주)', 0, 275000, 'legacy-dup', 'x')")
+      .run(batch);
+    const dupId = Number((db.raw.prepare("SELECT id FROM bank_transactions WHERE transaction_hash = 'legacy-dup'").get() as { id: number }).id);
+    await assignTransaction(db, dupId, { clientId: clientIds['광일운수㈜'] });
+    expect(count(`SELECT COUNT(*) AS n FROM payment_allocations WHERE transaction_id = ${dupId}`)).toBe(1);
+
+    const r = await markDuplicateTransactions(db);
+    expect(r).toEqual({ marked: 1, ids: [dupId] });
+    expect(count(`SELECT COUNT(*) AS n FROM payment_allocations WHERE transaction_id = ${dupId}`)).toBe(0);
+    const t = (await listTransactions(db)).find((x) => x.id === dupId)!;
+    expect(t).toMatchObject({ category: 'DUPLICATE', client_id: null });
+    expect((await individualCases(db)).some((x) => x.id === dupId)).toBe(false);
+    expect((await markDuplicateTransactions(db)).marked).toBe(0); // 재실행해도 추가 없음
+    expect(count('SELECT COUNT(*) AS n FROM bank_transactions')).toBe(2); // 원본은 보존
+  });
+});
+
+describe('개별건으로 확정', () => {
+  test('거래처 대신 개별건 지정 → 개별건 목록에 남고, 동기화 추천 갱신 대상 아님, 나중에 거래처 지정 가능', async () => {
+    await commitImport(db, { filename: 'g.xlsx', fileHash: 'a2'.padEnd(64, '0'), rows: [row(2, '2026-09-01 10:00:00', '광일상사', 70000)] });
+    const [t] = await listTransactions(db);
+    const r = await bulkTransactions(db, { action: 'individual', ids: [t.id] });
+    expect(r.done).toBe(1);
+    const [ind] = await individualCases(db);
+    expect(ind).toMatchObject({ id: t.id, category: 'INDIVIDUAL', client_id: null, match_status: 'UNMATCHED' });
+    await syncClients(db, sheet(MASTER));
+    expect((await individualCases(db))[0].client_id).toBeNull();
+    // 다시 거래처로 확정하면 분류 해제
+    db.raw.prepare("UPDATE clients SET management_start_month = '2026-05'").run();
+    await bulkTransactions(db, { action: 'confirm', ids: [t.id], clientId: clientIds['광일운수㈜'], includeWarnings: true });
+    const [after] = await listTransactions(db);
+    expect(after).toMatchObject({ category: null, match_status: 'MANUAL_MATCHED' });
   });
 });
 

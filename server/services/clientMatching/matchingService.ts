@@ -41,7 +41,7 @@ export async function refreshPendingSuggestions(db: SqlDb): Promise<number> {
     db,
     `SELECT t.id, t.sender_raw, m.client_id, m.status FROM bank_transactions t
      JOIN transaction_client_matches m ON m.transaction_id = t.id
-     WHERE t.deposit_amount > 0 AND m.status IN ('UNMATCHED', 'REVIEW_REQUIRED')`,
+     WHERE t.deposit_amount > 0 AND m.status IN ('UNMATCHED', 'REVIEW_REQUIRED') AND m.category IS NULL`,
   );
   if (!rows.length) return 0;
   const index = await loadMatchIndex(db);
@@ -54,7 +54,7 @@ export async function refreshPendingSuggestions(db: SqlDb): Promise<number> {
       db
         .prepare(
           `UPDATE transaction_client_matches SET client_id = ?, similarity_score = ?, match_type = ?, status = 'REVIEW_REQUIRED', updated_at = ?
-           WHERE transaction_id = ? AND status IN ('UNMATCHED', 'REVIEW_REQUIRED')`,
+           WHERE transaction_id = ? AND status IN ('UNMATCHED', 'REVIEW_REQUIRED') AND category IS NULL`,
         )
         .bind(res.clientId, Math.max(0, Math.min(100, res.score)), res.matchType, now, r.id),
     );

@@ -26,11 +26,12 @@ export function BulkActionBar({
   const [busy, setBusy] = useState(false);
   const [pickOpen, setPickOpen] = useState(false);
   const [pickClient, setPickClient] = useState<number | null>(null);
+  const [pickIndividual, setPickIndividual] = useState(false);
   const [report, setReport] = useState<(BulkActionResult & { title: string }) | null>(null);
 
   const byId = new Map(rows.map((r) => [r.id, r]));
   const sel = selected.map((id) => byId.get(id)).filter((r): r is TransactionRow => !!r);
-  const pending = sel.filter((r) => r.deposit_amount > 0 && r.match_status !== 'AUTO_MATCHED' && r.match_status !== 'MANUAL_MATCHED');
+  const pending = sel.filter((r) => r.deposit_amount > 0 && r.category !== 'DUPLICATE' && r.match_status !== 'AUTO_MATCHED' && r.match_status !== 'MANUAL_MATCHED');
   const withSuggestion = pending.filter((r) => r.client_id != null);
   const confirmed = sel.filter((r) => r.match_status === 'AUTO_MATCHED' || r.match_status === 'MANUAL_MATCHED');
 
@@ -123,26 +124,49 @@ export function BulkActionBar({
         variant="modal"
         width="max-w-xl"
         onClose={() => setPickOpen(false)}
-        title={`거래처 일괄 지정 — 미확정 ${pending.length}건`}
+        title={`거래처 지정 — 미확정 ${pending.length}건`}
         footer={
           <>
             <Button onClick={() => setPickOpen(false)}>취소</Button>
             <Button
               variant="primary"
-              disabled={pickClient == null || busy}
+              disabled={(!pickIndividual && pickClient == null) || busy}
               onClick={() => {
                 setPickOpen(false);
-                void run('거래처 일괄 지정', { action: 'confirm', clientId: pickClient, startMonth: month || null, includeWarnings }, pending.map((r) => r.id));
+                if (pickIndividual) void run('개별건으로 지정', { action: 'individual' }, pending.map((r) => r.id));
+                else void run('거래처 일괄 지정', { action: 'confirm', clientId: pickClient, startMonth: month || null, includeWarnings }, pending.map((r) => r.id));
               }}
             >
-              지정 후 확정
+              {pickIndividual ? '개별건으로 확정' : '지정 후 확정'}
             </Button>
           </>
         }
       >
         <div className="space-y-3 text-sm">
-          <p className="text-slate-600">선택한 미확정 입금을 모두 아래 거래처로 확정합니다. (예: CMS집금 여러 건) 첫 적용월: {month || '입력 안 함'}</p>
-          <ClientPicker clients={clients} value={pickClient} onChange={setPickClient} autoFocus />
+          <p className="text-slate-600">선택한 미확정 입금을 모두 아래 거래처(또는 개별건)로 확정합니다. 첫 적용월: {month || '입력 안 함'}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setPickIndividual(true);
+              setPickClient(null);
+            }}
+            className={cx(
+              'flex w-full items-center justify-between rounded-md border px-3 py-2 text-left',
+              pickIndividual ? 'border-violet-500 bg-violet-50 font-medium text-violet-900' : 'border-slate-300 hover:bg-slate-50',
+            )}
+          >
+            <span>개별건 (거래처 아님)</span>
+            <span className="text-xs text-slate-500">노무자문비에 배정하지 않고 개별건으로 확정</span>
+          </button>
+          <ClientPicker
+            clients={clients}
+            value={pickIndividual ? null : pickClient}
+            onChange={(id) => {
+              setPickIndividual(false);
+              setPickClient(id);
+            }}
+            autoFocus
+          />
         </div>
       </Overlay>
 

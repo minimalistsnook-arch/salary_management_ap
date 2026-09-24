@@ -100,7 +100,7 @@ export function TransactionDrawer({ id, onClose, onChanged }: { id: number; onCl
             <div className="space-y-3 rounded-md border border-slate-200 p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-base font-semibold">{t.client_name ?? '거래처 미지정'}</span>
-                <MatchBadge status={t.match_status} />
+                {t.category === 'INDIVIDUAL' ? <Badge tone="violet">개별건 확정</Badge> : t.category === 'DUPLICATE' ? <Badge>중복 건너뜀</Badge> : <MatchBadge status={t.match_status} />}
                 {t.client_name && (
                   <span className="text-xs text-slate-500">
                     유사도 <ScoreText score={t.similarity_score} /> · {MATCH_TYPE_LABEL[t.match_type]}
@@ -119,6 +119,18 @@ export function TransactionDrawer({ id, onClose, onChanged }: { id: number; onCl
                   <Button size="sm" onClick={() => setMode(mode === 'client' ? null : 'client')}>
                     {t.client_id ? '다른 거래처 선택' : '거래처 선택'}
                   </Button>
+                  {t.category !== 'INDIVIDUAL' && t.category !== 'DUPLICATE' && (
+                    <Button
+                      size="sm"
+                      disabled={busy}
+                      onClick={() =>
+                        window.confirm('이 입금을 거래처가 아닌 개별건으로 확정할까요? (노무자문비 배정은 지워집니다)') &&
+                        void act(() => api.bulk({ action: 'individual', ids: [id] }), '개별건으로 지정')
+                      }
+                    >
+                      개별건으로 지정
+                    </Button>
+                  )}
                   {isMatched && (
                     <>
                       <Button size="sm" onClick={() => setMode(mode === 'start' ? null : 'start')}>

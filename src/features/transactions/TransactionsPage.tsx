@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApp } from '../../app/AppContext';
 import type { TransactionRow } from '../../domain/dto';
-import { isIndividualCase, MATCH_STATUS_LABEL, PAYMENT_STATUS_LABEL } from '../../domain/labels';
+import { isIndividualCase, isSkippedDuplicate, MATCH_STATUS_LABEL, PAYMENT_STATUS_LABEL } from '../../domain/labels';
 import { currentYearMonth } from '../../domain/month';
 import { normalizeName } from '../../domain/normalize';
 import type { MatchStatus, PaymentStatus } from '../../domain/types';
@@ -70,8 +70,8 @@ export function TransactionsPage() {
   const advisory = useAsync(() => (view === 'list' ? Promise.resolve(null) : api.advisory(Number(effectiveYear === 'all' ? now.slice(0, 4) : effectiveYear))), [view, effectiveYear, dataVersion]);
 
   // 매칭되지 않은 입금은 '3. 개별건'으로 — 여기에는 거래처로 확정된 입금(과 출금)만
-  const ledgerRows = useMemo(() => (txs.data ?? []).filter((t) => !isIndividualCase(t)), [txs.data]);
-  const individualCount = (txs.data ?? []).length - ledgerRows.length;
+  const ledgerRows = useMemo(() => (txs.data ?? []).filter((t) => !isIndividualCase(t) && !isSkippedDuplicate(t)), [txs.data]);
+  const individualCount = (txs.data ?? []).filter(isIndividualCase).length;
 
   const filtered = useMemo(() => {
     const nq = normalizeName(q);

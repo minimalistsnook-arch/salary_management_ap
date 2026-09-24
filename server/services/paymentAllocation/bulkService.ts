@@ -5,7 +5,7 @@ import { similarity } from '../../../src/domain/matching';
 import { isYearMonth } from '../../../src/domain/month';
 import type { Client, YearMonth } from '../../../src/domain/types';
 import { auditStmt } from '../../audit';
-import { AppError, nowIso, placeholders, type SqlDb, type SqlStatement } from '../../db';
+import { AppError, all, nowIso, placeholders, type SqlDb, type SqlStatement } from '../../db';
 import { allocationsForClients, listClients, queryTransactions } from '../../repos';
 import { learnAliasStmt } from '../clientMatching/matchingService';
 import { insertAllocationStmts, planForClient, upsertMatchStmt } from './allocationService';
@@ -32,13 +32,34 @@ export async function bulkTransactions(db: SqlDb, req: BulkActionRequest): Promi
   const ids = [...new Set((req?.ids ?? []).filter((n) => Number.isSafeInteger(n) && n > 0))];
   if (!ids.length) throw new AppError('선택한 거래가 없습니다.');
   if (ids.length > MAX_IDS) throw new AppError(`한 번에 ${MAX_IDS}건까지 처리할 수 있습니다.`);
-  if (!['confirm', 'redate', 'unassign'].includes(req.action)) throw new AppError('알 수 없는 작업입니다.');
+  if (!['confirm', 'redate', 'unassign', 'individual'].includes(req.action)) throw new AppError('알 수 없는 작업입니다.');
   if (req.startMonth && !isYearMonth(req.startMonth)) throw new AppError('첫 적용월은 YYYY-MM 형식이어야 합니다.');
   if (req.action === 'redate' && !req.startMonth) throw new AppError('변경할 적용월을 입력해주세요.');
 
   const txs = await loadTransactions(db, ids);
   const result: BulkActionResult = { done: 0, skipped: [], failed: [] };
   const stmts: SqlStatement[] = [];
+
+  if (req.action === 'individual') {
+    for (const t of txs) {
+      if (t.category === 'DUPLICATE') {
+        result.skipped.push({ id: t.id, reason: '중복 건너뜀 거래' });
+        continue;
+      }
+      if (t.deposit_amount <= 0) {
+        result.skipped.push({ id: t.id, reason: '출금 거래' });
+        continue;
+      }
+      stmts.push(
+        db.prepare('DELETE FROM payment_allocations WHERE transaction_id = ?').bind(t.id),
+        upsertMatchStmt(db, t.id, { clientId: null, score: 0, matchType: 'NONE', status: 'UNMATCHED', note: t.note, category: 'INDIVIDUAL' }),
+        auditStmt(db, 'MARK_INDIVIDUAL', 'transaction', t.id, { client_id: t.client_id, status: t.match_status, allocations: t.allocations }, { category: 'INDIVIDUAL' }),
+      );
+      result.done++;
+    }
+    if (stmts.length) await db.batch(stmts);
+    return result;
+  }
 
   if (req.action === 'unassign') {
     for (const t of txs) {
@@ -48,7 +69,7 @@ export async function bulkTransactions(db: SqlDb, req: BulkActionRequest): Promi
       }
       stmts.push(
         db.prepare('DELETE FROM payment_allocations WHERE transaction_id = ?').bind(t.id),
-        upsertMatchStmt(db, t.id, { clientId: t.client_id, score: t.similarity_score, matchType: t.match_type, status: 'REVIEW_REQUIRED', note: t.note }),
+        upsertMatchStmt(db, t.id, { clientId: t.client_id, score: t.similarity_score, matchType: t.match_type, status: 'REVIEW_REQUIRED', note: t.note, category: null }),
         auditStmt(db, 'BULK_UNASSIGN', 'transaction', t.id, { client_id: t.client_id, status: t.match_status, allocations: t.allocations }, { status: 'REVIEW_REQUIRED' }),
       );
       result.done++;
@@ -61,6 +82,10 @@ export async function bulkTransactions(db: SqlDb, req: BulkActionRequest): Promi
   const targets: { t: TransactionRow; client: Client }[] = [];
   for (const t of txs) {
     const confirmed = t.match_status === 'AUTO_MATCHED' || t.match_status === 'MANUAL_MATCHED';
+    if (t.category === 'DUPLICATE') {
+      result.skipped.push({ id: t.id, reason: '중복 건너뜀 거래' });
+      continue;
+    }
     if (t.deposit_amount <= 0) {
       result.skipped.push({ id: t.id, reason: '출금 거래' });
       continue;
@@ -125,7 +150,7 @@ export async function bulkTransactions(db: SqlDb, req: BulkActionRequest): Promi
     }
     stmts.push(
       db.prepare('DELETE FROM payment_allocations WHERE transaction_id = ?').bind(t.id),
-      upsertMatchStmt(db, t.id, { clientId: client.id, score: similarity(t.sender_raw, client.name), matchType: 'MANUAL', status: 'MANUAL_MATCHED', note: t.note }),
+      upsertMatchStmt(db, t.id, { clientId: client.id, score: similarity(t.sender_raw, client.name), matchType: 'MANUAL', status: 'MANUAL_MATCHED', note: t.note, category: null }),
       ...insertAllocationStmts(db, { idSql: '?', idParams: [t.id] }, client.id, t.transaction_datetime.slice(0, 10), plan.lines, 'BANK'),
       auditStmt(
         db,
@@ -142,4 +167,32 @@ export async function bulkTransactions(db: SqlDb, req: BulkActionRequest): Promi
   }
   if (stmts.length) await db.batch(stmts);
   return result;
+}
+
+/**
+ * 이미 저장된 통장 거래 중 같은 날짜·시각·입금자·금액이 겹치는 행: 가장 먼저 저장된 1건만 남기고
+ * 나머지는 '중복 건너뜀'(DUPLICATE)으로 표시한다. 원본 행은 지우지 않고 배정만 제거한다.
+ */
+export async function markDuplicateTransactions(db: SqlDb): Promise<{ marked: number; ids: number[] }> {
+  const dups = await all<{ id: number; keep_id: number }>(
+    db,
+    `SELECT t.id, (SELECT MIN(t2.id) FROM bank_transactions t2
+                   WHERE t2.transaction_datetime = t.transaction_datetime AND TRIM(t2.sender_raw) = TRIM(t.sender_raw)
+                     AND t2.withdrawal_amount = t.withdrawal_amount AND t2.deposit_amount = t.deposit_amount) AS keep_id
+     FROM bank_transactions t LEFT JOIN transaction_client_matches m ON m.transaction_id = t.id
+     WHERE COALESCE(m.category, '') <> 'DUPLICATE'`,
+  );
+  const ids = dups.filter((d) => d.id !== d.keep_id).map((d) => d.id);
+  if (!ids.length) return { marked: 0, ids };
+  const txs = await loadTransactions(db, ids);
+  const stmts: SqlStatement[] = [];
+  for (const t of txs) {
+    stmts.push(
+      db.prepare('DELETE FROM payment_allocations WHERE transaction_id = ?').bind(t.id),
+      upsertMatchStmt(db, t.id, { clientId: null, score: 0, matchType: 'NONE', status: 'UNMATCHED', note: t.note, category: 'DUPLICATE' }),
+      auditStmt(db, 'MARK_DUPLICATE', 'transaction', t.id, { client_id: t.client_id, status: t.match_status, allocations: t.allocations }, { category: 'DUPLICATE' }),
+    );
+  }
+  await db.batch(stmts);
+  return { marked: ids.length, ids };
 }

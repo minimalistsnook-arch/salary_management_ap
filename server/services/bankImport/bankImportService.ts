@@ -92,12 +92,13 @@ export async function buildPreview(db: SqlDb, req: ImportPreviewRequest): Promis
       if (!c || !c.active) throw new AppError(`선택한 거래처를 찾을 수 없습니다: Excel ${r.excelRowNumber}행`);
     }
     const kind: RowKind = r.depositAmount > 0 && r.withdrawalAmount > 0 ? 'BOTH' : r.depositAmount > 0 ? 'DEPOSIT' : 'WITHDRAWAL';
+    // 같은 날짜·시각·입금자·금액이 겹치면 첫 건만 가져오고 나머지는 건너뛴다
     const key = contentKey(r);
     let duplicateSuspect: string | null = null;
     const ex = contentMap.get(key);
-    if (ex && ex.hash !== hashes[i]) duplicateSuspect = `같은 내용의 거래가 이미 등록되어 있습니다 (${ex.filename} ${ex.row}행).`;
-    else if (inFile.has(key)) duplicateSuspect = `같은 파일 ${inFile.get(key)}행과 내용이 같습니다.`;
-    inFile.set(key, r.excelRowNumber);
+    if (ex && ex.hash !== hashes[i]) duplicateSuspect = `중복 건너뜀 — 같은 날짜·시각·입금자·금액의 거래가 이미 등록되어 있습니다 (${ex.filename} ${ex.row}행).`;
+    else if (inFile.has(key)) duplicateSuspect = `중복 건너뜀 — 같은 파일 ${inFile.get(key)}행과 날짜·시각·입금자·금액이 같습니다.`;
+    else inFile.set(key, r.excelRowNumber);
 
     const autoMatch = matchWithIndex(r.senderRaw, index);
     const manualChosen = d.clientId !== undefined;
@@ -112,7 +113,7 @@ export async function buildPreview(db: SqlDb, req: ImportPreviewRequest): Promis
       ...r,
       transactionHash: hashes[i],
       kind,
-      duplicate: dupSet.has(hashes[i]),
+      duplicate: dupSet.has(hashes[i]) || duplicateSuspect !== null,
       duplicateSuspect,
       autoMatch,
       clientId: client?.id ?? null,
