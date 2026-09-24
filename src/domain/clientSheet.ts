@@ -2,8 +2,10 @@ import { parseWon } from './money';
 
 /**
  * 거래처 마스터 Google Sheet 해석.
- * - B열 = 정확한 거래처명, C열 = 월 계약금액
- * - A열에 값이 있는 행은 '통장표기(A) → 거래처(B)' 별칭 매핑 행으로 보고 거래처로 등록하지 않는다.
+ * - B열 = 정확한 거래처명, C열 = 월 계약금액 → B·C 가 있으면 항상 거래처
+ * - A열 값 = 그 거래처(B)의 통장 표기 별칭 (예: A '(주)마을버스남산운수' → B '남산운수마을버스㈜')
+ * - B열이 'x' 이면 A열 입금처는 거래처가 아님 (제외)
+ * - 같은 거래처명이 다시 나오면 먼저 나온 행의 계약금액을 사용하고 경고
  */
 
 export interface SheetClient {
@@ -72,18 +74,18 @@ export function interpretClientSheet(rows: string[][]): ClientSheetResult {
     const b = (r[1] ?? '').trim();
     const cRaw = (r[2] ?? '').trim();
     if (!b) return;
-    if (a) {
-      if (b.toLowerCase() === 'x') exclusions.push({ rawSender: a, sourceRow });
-      else aliasRows.push({ rawSender: a, clientName: b, sourceRow });
+    if (b.toLowerCase() === 'x') {
+      if (a) exclusions.push({ rawSender: a, sourceRow });
       return;
     }
+    if (a) aliasRows.push({ rawSender: a, clientName: b, sourceRow });
     const amount = parseWon(cRaw);
     if (amount === null || amount < 0) {
       if (cRaw && !/금액/.test(cRaw)) warnings.push(`${sourceRow}행 '${b}': 계약금액 '${cRaw}'을 읽을 수 없어 제외했습니다.`);
       return;
     }
     if (seen.has(b)) {
-      warnings.push(`${sourceRow}행 '${b}': ${seen.get(b)}행과 중복된 거래처명이라 제외했습니다.`);
+      if (!a) warnings.push(`${sourceRow}행 '${b}': ${seen.get(b)}행과 중복된 거래처명이라 제외했습니다.`);
       return;
     }
     seen.set(b, sourceRow);

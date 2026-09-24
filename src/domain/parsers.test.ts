@@ -86,6 +86,18 @@ describe('통장 Excel 파서', () => {
 });
 
 describe('거래처 마스터 시트 해석', () => {
+  test('A열이 있어도 B·C 가 있으면 거래처 + A열은 별칭 (구글시트 8행)', () => {
+    const r = interpretClientSheet(parseCsv('(주)마을버스남산운수,남산운수마을버스㈜,"220,000"\n,광일운수㈜,"275,000"\n씨케이,광일운수㈜,"999"\n'));
+    expect(r.clients.map((c) => [c.name, c.contractAmount])).toEqual([
+      ['남산운수마을버스㈜', 220000],
+      ['광일운수㈜', 275000], // 아래쪽 중복 행 금액(999)은 쓰지 않음
+    ]);
+    expect(r.aliases.map((x) => [x.rawSender, x.clientName])).toEqual([
+      ['(주)마을버스남산운수', '남산운수마을버스㈜'],
+      ['씨케이', '광일운수㈜'],
+    ]);
+  });
+
   test('B열=거래처명, C열=계약금액, A열 값이 있으면 별칭 행', () => {
     const csv = ' ,회 원 사,계약금액,,\n,,,,\n,남산운수마을버스㈜,"220,000",,\n,"충남식당,삼정집","110,000",,\n,러스크강동병원,"1,100,000",,\n,남산운수마을버스㈜,"999",,\n송연탁 ,러스크강동병원,"88,000",,\n경원여객,x,,,\n';
     const r = interpretClientSheet(parseCsv(csv));

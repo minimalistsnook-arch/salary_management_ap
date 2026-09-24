@@ -5,6 +5,7 @@ import type { Client } from '../../../src/domain/types';
 import { auditStmt } from '../../audit';
 import { all, first, nowIso, type SqlDb, type SqlStatement } from '../../db';
 import { listClients } from '../../repos';
+import { refreshPendingSuggestions } from '../clientMatching/matchingService';
 import type { ClientSourceAdapter } from './adapters';
 
 export async function getSyncStatus(db: SqlDb): Promise<SyncStatus> {
@@ -124,5 +125,21 @@ export async function syncClients(db: SqlDb, adapter: ClientSourceAdapter): Prom
   } catch (e) {
     return logFailure(db, adapter.name, `저장 중 오류가 발생해 변경사항을 반영하지 않았습니다: ${(e as Error).message}`);
   }
-  return { ok: true, message, added, updated, deactivated, aliases, warnings: sheet.warnings, status: await getSyncStatus(db) };
+  // 새 거래처·별칭 기준으로 미확정 입금의 추천 거래처 갱신 (확정은 하지 않음)
+  let suggested = 0;
+  try {
+    suggested = await refreshPendingSuggestions(db);
+  } catch (e) {
+    sheet.warnings.push(`미확정 입금 추천 갱신 실패: ${(e as Error).message}`);
+  }
+  return {
+    ok: true,
+    message: suggested ? `${message} · 미확정 입금 추천 갱신 ${suggested}` : message,
+    added,
+    updated,
+    deactivated,
+    aliases,
+    warnings: sheet.warnings,
+    status: await getSyncStatus(db),
+  };
 }

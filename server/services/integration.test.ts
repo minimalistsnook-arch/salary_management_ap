@@ -298,6 +298,23 @@ describe('시트 A열 별칭', () => {
   });
 });
 
+describe('거래처 시트 A열 + 추천 갱신', () => {
+  test('A열에 통장명이 있는 거래처 행도 등록되고, 저장된 미매칭 입금에 추천이 붙음', async () => {
+    const without = MASTER.filter((r) => r[1] !== '남산운수마을버스㈜');
+    await syncClients(db, sheet(without));
+    await commitImport(db, { filename: 'n.xlsx', fileHash: '8'.repeat(64), rows: [row(2, '2026-08-28 11:31:00', '(주)마을버스남산운수', 220000)] });
+    const [before] = await listTransactions(db);
+    expect(before.client_id).toBeNull();
+
+    const r = await syncClients(db, sheet([...without, ['(주)마을버스남산운수', '남산운수마을버스㈜', '220,000']]));
+    expect(r.ok).toBe(true);
+    expect(r.message).toMatch(/추천 갱신 1/);
+    expect(count("SELECT active AS n FROM clients WHERE name = '남산운수마을버스㈜'")).toBe(1);
+    const [after] = await listTransactions(db);
+    expect(after).toMatchObject({ client_name: '남산운수마을버스㈜', match_status: 'REVIEW_REQUIRED', allocations: [] });
+  });
+});
+
 describe('거래처 동기화', () => {
   test('실패 시 기존 거래처 데이터 유지 + 실패 기록', async () => {
     const before = count('SELECT COUNT(*) AS n FROM clients');
