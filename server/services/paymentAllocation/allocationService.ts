@@ -78,7 +78,7 @@ async function loadTx(db: SqlDb, txId: number) {
   return { tx, match, allocations };
 }
 
-function upsertMatchStmt(db: SqlDb, txId: number, m: { clientId: number | null; score: number; matchType: string; status: string; note: string | null }) {
+export function upsertMatchStmt(db: SqlDb, txId: number, m: { clientId: number | null; score: number; matchType: string; status: string; note: string | null }) {
   const now = nowIso();
   return db
     .prepare(

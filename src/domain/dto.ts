@@ -111,6 +111,23 @@ export interface TransactionRow {
   allocations: TxAllocation[];
 }
 
+export interface BulkActionRequest {
+  action: 'confirm' | 'redate' | 'unassign';
+  ids: number[];
+  /** 지정 거래처 (없으면 각 거래의 추천 거래처) */
+  clientId?: number | null;
+  /** confirm: 관리 시작월 없는 거래처의 첫 적용월 / redate: 다시 배정할 시작월 */
+  startMonth?: YearMonth | null;
+  /** confirm: 수수료 차감 가능성·큰 금액 경고 건도 확정 (기본은 건너뜀) */
+  includeWarnings?: boolean;
+}
+
+export interface BulkActionResult {
+  done: number;
+  skipped: { id: number; reason: string }[];
+  failed: { id: number; error: string }[];
+}
+
 export interface AuditLog {
   id: number;
   action: string;

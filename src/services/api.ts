@@ -15,6 +15,8 @@ import type {
   SyncStatus,
   TransactionDetail,
   TransactionRow,
+  BulkActionRequest,
+  BulkActionResult,
 } from '../domain/dto';
 import type { Client, YearMonth } from '../domain/types';
 
@@ -70,6 +72,7 @@ export const api = {
   assign: (id: number, body: { clientId: number; startMonth?: YearMonth | null; note?: string | null }) => request('POST', `/api/transactions/${id}/assign`, body),
   setAllocations: (id: number, body: { lines: { serviceMonth: YearMonth; amount: number }[]; note?: string | null }) =>
     request('POST', `/api/transactions/${id}/allocations`, body),
+  bulk: (req: BulkActionRequest) => request<BulkActionResult>('POST', '/api/transactions/bulk', req),
   unassign: (id: number) => request('POST', `/api/transactions/${id}/unassign`),
   setNote: (id: number, note: string) => request('POST', `/api/transactions/${id}/note`, { note }),
 

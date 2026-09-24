@@ -6,6 +6,7 @@ import { buildPreview, commitImport } from './bankImport/bankImportService';
 import type { ClientSourceAdapter } from './clientSync/adapters';
 import { syncClients } from './clientSync/clientSyncService';
 import { assignTransaction, setManualAllocations } from './paymentAllocation/allocationService';
+import { bulkTransactions } from './paymentAllocation/bulkService';
 import { individualCases, listTransactions } from './query/queryService';
 
 const sheet = (rows: [string, string, string][]): ClientSourceAdapter => ({ name: 'test', fetchRows: async () => rows.map((r) => [...r]) });
@@ -162,6 +163,80 @@ describe('통장 업로드 → 저장', () => {
       ['2026-08', 110000, 'PARTIAL'],
     ]);
     expect(after.note).toBe('거래처 요청');
+  });
+});
+
+describe('일괄 처리 (V 선택)', () => {
+  const seed = async () => {
+    db.raw.prepare('UPDATE clients SET management_start_month = NULL').run();
+    await commitImport(db, {
+      filename: 'f.xlsx',
+      fileHash: '4'.repeat(64),
+      rows: [
+        row(2, '2026-09-01 10:00:00', '남산운수 주식회사', 220000),
+        row(3, '2026-09-10 10:00:00', '남산운수 주식회사', 440000),
+        row(4, '2026-09-11 10:00:00', '광일운수(주)', 275000),
+        row(5, '2026-09-12 10:00:00', 'CMS집금', 165000),
+      ],
+    });
+    const txs = await listTransactions(db);
+    return Object.fromEntries(txs.map((t) => [t.excel_row_number, t.id])) as Record<number, number>;
+  };
+
+  test('확인필요 여러 건을 첫 적용월과 함께 일괄 확정 (같은 거래처는 거래일시 순 누적)', async () => {
+    const id = await seed();
+    const noMonth = await bulkTransactions(db, { action: 'confirm', ids: [id[2], id[3], id[4]] });
+    expect(noMonth.done).toBe(0);
+    expect(noMonth.failed).toHaveLength(3); // 월 배정 필요
+
+    const r = await bulkTransactions(db, { action: 'confirm', ids: [id[3], id[2], id[4], id[5]], startMonth: '2026-05' });
+    expect(r.done).toBe(3);
+    expect(r.failed.map((f) => f.id)).toEqual([id[5]]); // CMS집금은 추천 거래처 없음
+    const txs = await listTransactions(db);
+    const months = (row: number) => txs.find((t) => t.id === id[row])!.allocations.map((a) => a.service_month);
+    expect(months(2)).toEqual(['2026-05']);
+    expect(months(3)).toEqual(['2026-06', '2026-07']);
+    expect(months(4)).toEqual(['2026-05']);
+    expect(txs.find((t) => t.id === id[2])!.match_status).toBe('MANUAL_MATCHED');
+    expect(count("SELECT COUNT(*) AS n FROM clients WHERE management_start_month = '2026-05'")).toBe(2);
+
+    // 이미 확정된 건은 건너뜀
+    expect((await bulkTransactions(db, { action: 'confirm', ids: [id[2]] })).skipped).toHaveLength(1);
+    // CMS집금은 거래처를 지정해서 일괄 확정
+    const cms = await bulkTransactions(db, { action: 'confirm', ids: [id[5]], clientId: clientIds['청진운수㈜'], startMonth: '2026-08' });
+    expect(cms.done).toBe(1);
+    expect(count("SELECT COUNT(*) AS n FROM client_aliases WHERE normalized_sender = 'cms집금'")).toBe(0);
+  });
+
+  test('일괄 확정은 경고 건(큰 금액·수수료 차감)을 기본으로 건너뜀', async () => {
+    db.raw.prepare("UPDATE clients SET management_start_month = '2026-05'").run();
+    await commitImport(db, {
+      filename: 'w.xlsx',
+      fileHash: '6'.repeat(64),
+      rows: [row(2, '2026-09-01 10:00:00', '남산운수 주식회사', 3300000), row(3, '2026-09-02 10:00:00', '광일운수(주)', 274725)],
+    });
+    const ids = (await listTransactions(db)).map((t) => t.id);
+    const r = await bulkTransactions(db, { action: 'confirm', ids });
+    expect(r.done).toBe(0);
+    expect(r.skipped.map((s) => s.reason).join()).toMatch(/개월분.*|수수료/);
+    expect((await bulkTransactions(db, { action: 'confirm', ids, includeWarnings: true })).done).toBe(2);
+  });
+
+  test('적용월 일괄 변경 · 일괄 취소', async () => {
+    const id = await seed();
+    await bulkTransactions(db, { action: 'confirm', ids: [id[2], id[3]], startMonth: '2026-05' });
+    const r = await bulkTransactions(db, { action: 'redate', ids: [id[2], id[3]], startMonth: '2026-08' });
+    expect(r.done).toBe(2);
+    let txs = await listTransactions(db);
+    expect(txs.find((t) => t.id === id[2])!.allocations.map((a) => a.service_month)).toEqual(['2026-08']);
+    expect(txs.find((t) => t.id === id[3])!.allocations.map((a) => a.service_month)).toEqual(['2026-09', '2026-10']);
+
+    const u = await bulkTransactions(db, { action: 'unassign', ids: [id[2], id[3]] });
+    expect(u.done).toBe(2);
+    txs = await listTransactions(db);
+    expect(txs.find((t) => t.id === id[2])).toMatchObject({ match_status: 'REVIEW_REQUIRED', allocations: [] });
+    expect(txs.find((t) => t.id === id[2])!.client_name).toBe('남산운수마을버스㈜'); // 추천은 유지
+    expect(count(`SELECT COUNT(*) AS n FROM audit_logs WHERE action LIKE 'BULK_%'`)).toBe(6);
   });
 });
 

@@ -12,6 +12,7 @@ import { summaryLink } from '../dashboard/DashboardPage';
 import { SummaryCards, type SummaryKey } from '../dashboard/SummaryCards';
 import { ClientView } from '../views/ClientView';
 import { MonthlyView } from '../views/MonthlyView';
+import { BulkActionBar } from './BulkActionBar';
 import { TransactionDrawer } from './TransactionDrawer';
 
 type View = 'list' | 'monthly' | 'client';
@@ -39,6 +40,14 @@ export function TransactionsPage() {
   const [q, setQ] = useState('');
   const [view, setView] = useState<View>('list');
   const [openId, setOpenId] = useState<number | null>(null);
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const toggle = (id: number, on: boolean) =>
+    setSel((s) => {
+      const n = new Set(s);
+      if (on) n.add(id);
+      else n.delete(id);
+      return n;
+    });
   const [limit, setLimit] = useState(PAGE);
 
   const set = (patch: Record<string, string | null>) => {
@@ -193,6 +202,19 @@ export function TransactionsPage() {
               거래 {filtered.length.toLocaleString('ko-KR')}건 <span className="ml-2 font-normal text-slate-500">입금 {won(totals.dep)} · 출금 {won(totals.wd)}</span>
             </span>
           }
+          actions={
+            <>
+              <Button
+                size="sm"
+                onClick={() => setSel(new Set(filtered.filter((t) => t.deposit_amount > 0 && t.match_status === 'REVIEW_REQUIRED' && t.client_id != null).map((t) => t.id)))}
+              >
+                V 추천 있는 확인필요 전체 선택 ({filtered.filter((t) => t.deposit_amount > 0 && t.match_status === 'REVIEW_REQUIRED' && t.client_id != null).length})
+              </Button>
+              <Button size="sm" onClick={() => setSel(new Set(filtered.filter((t) => t.deposit_amount > 0).map((t) => t.id)))}>
+                V 입금 전체 선택
+              </Button>
+            </>
+          }
         >
           <ErrorBox error={txs.error} onRetry={txs.reload} />
           {txs.loading && !txs.data ? (
@@ -204,7 +226,15 @@ export function TransactionsPage() {
               <table className="w-full min-w-[1080px] text-sm">
                 <thead className="sticky top-0 bg-slate-50 text-xs whitespace-nowrap text-slate-500">
                   <tr className="text-left">
-                    <th className="px-3 py-2">거래일시</th>
+                    <th className="w-8 px-3 py-2">
+                      <input
+                        type="checkbox"
+                        aria-label="전체 선택"
+                        checked={filtered.length > 0 && filtered.every((t) => sel.has(t.id))}
+                        onChange={(e) => setSel(e.target.checked ? new Set(filtered.map((t) => t.id)) : new Set())}
+                      />
+                    </th>
+                    <th className="px-2 py-2">거래일시</th>
                     <th className="px-2 py-2">통장 원본명</th>
                     <th className="px-2 py-2">거래처명</th>
                     <th className="px-2 py-2 text-right">매칭률</th>
@@ -223,8 +253,11 @@ export function TransactionsPage() {
                     const ws = worstStatus(t);
                     const allocated = t.allocations.reduce((s, a) => s + a.allocated_amount, 0);
                     return (
-                      <tr key={t.id} className="cursor-pointer hover:bg-blue-50/40" onClick={() => setOpenId(t.id)}>
-                        <td className="px-3 py-2 whitespace-nowrap tabular-nums">{t.transaction_datetime.slice(0, 16)}</td>
+                      <tr key={t.id} className={cx('cursor-pointer hover:bg-blue-50/40', sel.has(t.id) && 'bg-blue-50/70')} onClick={() => setOpenId(t.id)}>
+                        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                          <input type="checkbox" aria-label="선택" checked={sel.has(t.id)} onChange={(e) => toggle(t.id, e.target.checked)} />
+                        </td>
+                        <td className="px-2 py-2 whitespace-nowrap tabular-nums">{t.transaction_datetime.slice(0, 16)}</td>
                         <td className="max-w-44 px-2 py-2">{t.sender_raw}</td>
                         <td className="px-2 py-2 font-medium">{t.client_name ?? <span className="font-normal text-slate-400">-</span>}</td>
                         <td className="px-2 py-2 text-right">{!t.client_name ? '-' : t.match_type === 'MANUAL' ? <span className="text-xs text-slate-500">수동</span> : <ScoreText score={t.similarity_score} />}</td>
@@ -273,6 +306,19 @@ export function TransactionsPage() {
             상태: {Object.values(PAYMENT_STATUS_LABEL).join(' / ')} — 적용 월의 현재 납부 상태입니다. 행을 클릭하면 원본/배정 상세와 수정 기능을 볼 수 있습니다.
           </div>
         </Card>
+      )}
+
+      {view === 'list' && (
+        <BulkActionBar
+          selected={[...sel]}
+          rows={txs.data ?? []}
+          clients={clients}
+          onClear={() => setSel(new Set())}
+          onDone={() => {
+            setSel(new Set());
+            bumpData();
+          }}
+        />
       )}
 
       {openId !== null && (
