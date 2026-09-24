@@ -18,12 +18,20 @@ export function listAliases(db: SqlDb): Promise<(ClientAlias & { client_name: st
 
 export async function allocationsForClients(db: SqlDb, clientIds: number[], excludeTransactionId?: number): Promise<GridAllocation[]> {
   if (!clientIds.length) return [];
-  const rows = await all<GridAllocation>(
-    db,
-    `SELECT id, client_id, transaction_id, service_month, payment_date, allocated_amount, contract_amount_snapshot, source
-     FROM payment_allocations WHERE client_id IN (${placeholders(clientIds.length)}) ORDER BY id`,
-    ...clientIds,
-  );
+  // D1 은 쿼리당 바인딩 변수 100개 제한 → 나눠서 조회
+  const rows: GridAllocation[] = [];
+  for (let i = 0; i < clientIds.length; i += 90) {
+    const chunk = clientIds.slice(i, i + 90);
+    rows.push(
+      ...(await all<GridAllocation>(
+        db,
+        `SELECT id, client_id, transaction_id, service_month, payment_date, allocated_amount, contract_amount_snapshot, source
+         FROM payment_allocations WHERE client_id IN (${placeholders(chunk.length)})`,
+        ...chunk,
+      )),
+    );
+  }
+  rows.sort((a, b) => a.id - b.id);
   return excludeTransactionId === undefined ? rows : rows.filter((r) => r.transaction_id !== excludeTransactionId);
 }
 

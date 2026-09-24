@@ -37,8 +37,12 @@ export function createSqliteDb(path = ':memory:'): SqlDb & { raw: DatabaseSync }
   raw.exec('PRAGMA foreign_keys = ON');
   applyMigrations(raw);
 
+  // Cloudflare D1 과 같은 제한: 쿼리당 바인딩 변수 최대 100개
   const makeStmt = (sql: string, params: unknown[] = []): SqlStatement & { exec(): unknown } => ({
-    bind: (...v: unknown[]) => makeStmt(sql, v),
+    bind: (...v: unknown[]) => {
+      if (v.length > 100) throw new Error(`D1_ERROR: too many SQL variables (${v.length} > 100)`);
+      return makeStmt(sql, v);
+    },
     all: async <T>() => ({ results: raw.prepare(sql).all(...params.map(norm)) as T[] }),
     first: async <T>() => (raw.prepare(sql).get(...params.map(norm)) as T) ?? null,
     run: async () => {

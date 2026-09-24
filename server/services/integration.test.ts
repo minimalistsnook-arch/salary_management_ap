@@ -8,7 +8,7 @@ import { syncClients } from './clientSync/clientSyncService';
 import { assignTransaction, setManualAllocations } from './paymentAllocation/allocationService';
 import { bulkTransactions } from './paymentAllocation/bulkService';
 import { applyBaseline, previewBaseline } from './baseline/baselineService';
-import { individualCases, listTransactions } from './query/queryService';
+import { dashboard, individualCases, listTransactions } from './query/queryService';
 
 const sheet = (rows: [string, string, string][]): ClientSourceAdapter => ({ name: 'test', fetchRows: async () => rows.map((r) => [...r]) });
 const MASTER: [string, string, string][] = [
@@ -370,6 +370,17 @@ describe('거래처 시트 A열 + 추천 갱신', () => {
     expect(count("SELECT active AS n FROM clients WHERE name = '남산운수마을버스㈜'")).toBe(1);
     const [after] = await listTransactions(db);
     expect(after).toMatchObject({ client_name: '남산운수마을버스㈜', match_status: 'REVIEW_REQUIRED', allocations: [] });
+  });
+});
+
+describe('거래처가 많을 때 (D1 변수 100개 제한)', () => {
+  test('거래처 150곳 + 배정이 있어도 대시보드·노무자문비 조회 성공', async () => {
+    const many: [string, string, string][] = [['', '회 원 사', '계약금액'], ...Array.from({ length: 150 }, (_, i) => ['', `테스트거래처${i}`, '110,000'] as [string, string, string])];
+    await syncClients(db, sheet([...MASTER, ...many.slice(1)]));
+    db.raw.prepare("UPDATE clients SET management_start_month = '2026-05'").run();
+    const d = await dashboard(db);
+    expect(d.clientCount).toBeGreaterThan(150);
+    expect(d.unpaidClientCount).toBeGreaterThan(150);
   });
 });
 
